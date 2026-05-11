@@ -173,9 +173,29 @@ The Chatterbox TTS Server is a self-hostable application designed to provide an 
 
 ### 2.2 Core Engine: Chatterbox TTS
 
-The server utilizes the **`chatterbox-tts`** model, developed by Resemble AI. This model is known for its ability to produce natural-sounding speech. The server primarily interacts with this model by loading it from the Hugging Face Hub and passing plain text for synthesis.
+The server uses the **`chatterbox-tts`** engine family developed by Resemble AI, via the `devnen/chatterbox-v2` fork. Three model variants are supported and hot-swappable at runtime through the Web UI engine dropdown (no restart required). The selected model is configured via `model.repo_id` in `config.yaml`.
 
-**Important Note on Text Input:** The `chatterbox-tts` engine, as integrated into this server, processes **plain text**. It does **not** support special tags for speaker differentiation (e.g., `[S1]`, `[S2]`) or explicit emotional control tags. The synthesis is single-speaker, based on the selected voice mode (predefined or cloned).
+**2.2.1 Original Chatterbox** (`model.repo_id: chatterbox`)
+
+- 0.5B-parameter LLaMA-backed model trained on 0.5M hours of cleaned data.
+- English only. High fidelity, strong voice cloning, supports `exaggeration` and `cfg_weight` parameters for emotion control.
+- Best choice when English quality is the priority and multilingual is not needed.
+
+**2.2.2 Chatterbox Turbo** (`model.repo_id: chatterbox-turbo`)
+
+- 350M-parameter streamlined variant. Distills the speech-token-to-mel diffusion decoder from 10 steps to 1, removing a major inference bottleneck.
+- Supports **paralinguistic tags** in the input text: `[laugh]`, `[cough]`, `[chuckle]`, plus text-based prompting for sigh / gasp / cough reactions.
+- Ignores `exaggeration`, `cfg_weight`, and `min_p` parameters (the model API does not take them) — the server logs a warning when these are passed and proceeds with the supported subset.
+- Best choice for real-time / agent workflows where latency matters more than absolute fidelity.
+
+**2.2.3 Chatterbox Multilingual** (`model.repo_id: chatterbox-multilingual`)
+
+- 0.5B-parameter variant trained on 23 languages: Arabic, Chinese, Danish, Dutch, English, Finnish, French, German, Greek, Hebrew, Hindi, Italian, Japanese, Korean, Malay, Norwegian, Polish, Portuguese, Russian, Spanish, Swahili, Swedish, Turkish.
+- Zero-shot voice cloning across languages, plus emotion exaggeration.
+- The `language` parameter on `/tts` selects the target language (ISO 639-1 code, e.g. `"de"`, `"ja"`). The Web UI populates the dropdown from `SUPPORTED_LANGUAGES` exposed by the loaded engine.
+- Best choice for international content; trades some English-specific fidelity for broad language coverage.
+
+**Important Note on Text Input:** The engine processes **plain text** plus the Turbo-only paralinguistic tags described above. It does **not** support speaker-differentiation tags like `[S1]` / `[S2]`. The synthesis is single-speaker, driven by the selected voice mode (predefined or cloned).
 
 ### 2.3 Key Server Features
 
@@ -259,7 +279,7 @@ Refer to `requirements.txt` [1] for the complete list.
 
 ## 4. Installation and Setup
 
-This section details the steps to install and configure the Chatterbox TTS Server on your system.
+This section details the **manual / advanced** installation path. For most users, the recommended path is the automated launcher (`python start.py` on any OS, or `start.bat` / `start.sh`) documented in the main [README.md](README.md#-installation-and-setup), which covers Portable Mode on Windows and all six hardware paths (CPU, NVIDIA cu121 / cu128 / cu130, AMD ROCm, AMD Strix Halo, Apple MPS). The instructions below are kept for users who prefer to manage the venv and requirements directly.
 
 ### 4.1 Prerequisites Checklist
 
@@ -441,7 +461,9 @@ The following table describes the main sections and some key parameters you migh
 |                       | `log_file_path`               | string        | Path to the server log file (relative to project root or absolute).                                           | `logs/tts_server.log`    |
 |                       | `log_file_max_size_mb`        | integer       | Maximum size of a single log file before rotation.                                                            | `10`                     |
 |                       | `log_file_backup_count`       | integer       | Number of backup log files to keep.                                                                           | `5`                      |
-| **`model`**           | `repo_id`                     | string        | Hugging Face repository ID for the `chatterbox-tts` model.                                                    | `ResembleAI/chatterbox`  |
+|                       | `ssl_certfile`                | string/null   | Path to SSL certificate file for HTTPS. Leave `null` to serve plain HTTP.                                     | `null`                   |
+|                       | `ssl_keyfile`                 | string/null   | Path to SSL private key file. Must be set together with `ssl_certfile`.                                       | `null`                   |
+| **`model`**           | `repo_id`                     | string        | Selects the engine: `chatterbox` / `original`, `chatterbox-turbo` / `turbo`, or `chatterbox-multilingual` / `multilingual`. Hot-swappable from the UI. | `chatterbox-turbo`       |
 | **`tts_engine`**      | `device`                      | string        | TTS processing device: `auto`, `cuda`, `mps`, or `cpu`. `auto` attempts CUDA, then MPS, falls back to CPU.     | `auto`                   |
 |                       | `predefined_voices_path`      | string        | Directory for predefined voice audio files.                                                                   | `voices`                 |
 |                       | `reference_audio_path`        | string        | Directory for user-uploaded reference audio files for voice cloning.                                          | `reference_audio`        |
@@ -473,6 +495,14 @@ The following table describes the main sections and some key parameters you migh
 | **`debug`**           | `save_intermediate_audio`     | boolean       | If true, save intermediate audio files during chunk processing for debugging.                                 | `false`                  |
 
 **Note:** Paths can be specified relative to the project root or as absolute paths.
+
+**Performance environment variable (not in `config.yaml`):**
+
+- `TTS_BF16` — controls whether the T3 model is converted to bfloat16 and run under autocast.
+  - `off` (default) — keep T3 in float32, no autocast. Preserves pre-v2.0 behavior on upgrade.
+  - `on` / `1` / `true` — force-enable. Assumes the hardware supports bf16.
+  - `auto` — enable only if `torch.cuda.is_bf16_supported()` reports `True` at runtime.
+  - Typical speedup on bf16-capable GPUs (RTX 30/40/50, A100, H100, Strix Halo) is around 40% on T3 token generation. Output is numerically slightly different from float32 but typically inaudible.
 
 #### 5.3.10 `audio_processing` (Conceptual)
 While not explicitly a top-level section in the provided `config.py`'s `DEFAULT_CONFIG`, flags for enabling audio post-processing features (like silence trimming) are typically boolean values. They might be under `debug` or a dedicated `audio_processing` section if you choose to group them. Example:
@@ -693,7 +723,8 @@ This is the primary and most flexible endpoint for TTS generation, offering full
     | `voice_mode`                | `"predefined"` \| `"clone"`      | No          | Specifies the voice generation mode.                                                                          | `"predefined"`                               |
     | `predefined_voice_id`       | string \| null                   | Conditional | Filename of the voice from `voices/`. Required if `voice_mode` is `predefined`.                             | `tts_engine.default_voice_id`                |
     | `reference_audio_filename`  | string \| null                   | Conditional | Filename of the audio from `reference_audio/`. Required if `voice_mode` is `clone`.                           | `null`                                       |
-    | `output_format`             | `"wav"` \| `"opus"`              | No          | Desired audio output format.                                                                                  | `audio_output.format`                        |
+    | `output_format`             | `"wav"` \| `"mp3"` \| `"opus"`   | No          | Desired audio output format. Ignored when `stream=true` (streaming always uses WAV).                          | `audio_output.format`                        |
+    | `stream`                    | boolean                          | No          | If true, returns a `StreamingResponse` that flushes WAV bytes as each chunk is synthesized. Chunk-level streaming only — see note below. | `false`                          |
     | `split_text`                | boolean \| null                  | No          | Enable/disable automatic text chunking.                                                                       | `true`                                       |
     | `chunk_size`                | integer \| null                  | No          | Approximate target character length for chunks (50-500 recommended).                                          | `120`                                        |
     | `temperature`               | float \| null                    | No          | Overrides default temperature.                                                                                | `generation_defaults.temperature`            |
@@ -704,8 +735,10 @@ This is the primary and most flexible endpoint for TTS generation, offering full
     | `language`                  | string \| null                   | No          | Overrides default language.                                                                                   | `generation_defaults.language`               |
 
 *   **Response:**
-    *   **Success (200 OK):** `StreamingResponse` containing binary audio data (media type `audio/wav` or `audio/opus`) with appropriate `Content-Disposition` headers for download.
-    *   **Error:** Standard FastAPI JSON error response (e.g., 400 for bad input, 404 for missing voice file, 500 for server error, 503 if model not loaded).
+    *   **Success (200 OK):** `StreamingResponse` containing binary audio data (media type `audio/wav`, `audio/mpeg`, or `audio/opus`) with appropriate `Content-Disposition` headers for download.
+    *   **Error:** Standard FastAPI JSON error response (e.g., 400 for bad input or path traversal in voice parameters, 404 for missing voice file, 500 for server error, 503 if model not loaded).
+
+*   **Streaming caveat:** the Chatterbox engine synthesizes a full chunk of audio in one forward pass; there is no token-by-token streaming inside a chunk. With `stream: true` the server flushes each chunk's WAV bytes to the client as soon as that chunk completes (with 20 ms crossfades stitched between chunks). This means streaming gives **no benefit for short inputs** (1 chunk = client waits for full synthesis before any audio plays), but for long-form input (audiobooks, multi-paragraph content) the client can start playback as soon as chunk 1 is ready while later chunks render in the background.
 
 #### 8.2.4 Helper Endpoints
 These endpoints are primarily used by the Web UI to populate dynamic content and manage settings.
@@ -732,6 +765,16 @@ These endpoints are primarily used by the Web UI to populate dynamic content and
     *   Endpoint for uploading predefined voice audio files. Expects `multipart/form-data`.
     *   Validates and saves files to `predefined_voices_path`.
     *   Response: JSON detailing uploaded files, any errors, and the updated list of all predefined voices.
+*   **`GET /api/model-info`**:
+    *   Returns the currently-loaded model's status, type (`original` / `turbo` / `multilingual`), device, BF16 state, and the `SUPPORTED_LANGUAGES` map when the multilingual engine is active.
+*   **`POST /api/unload`**:
+    *   Releases the loaded model from GPU/CPU memory and clears the voice conditioning cache without restarting the server. Useful when switching engines or freeing VRAM for other workloads. The next `/tts` or `/v1/audio/speech` request triggers a fresh model load.
+*   **`GET /v1/audio/voices`**:
+    *   OpenAI-compatible voice listing endpoint. Accepts an optional `model` query parameter for compatibility but does not gate the response on it. Returns the same predefined-voice list as `GET /get_predefined_voices` in OpenAI's `{ "voices": [...] }` shape.
+
+#### 8.2.5 Security: path traversal protection
+
+The `predefined_voice_id`, `reference_audio_filename` fields on `/tts` and the `voice` field on `/v1/audio/speech` are sandboxed under their configured directories (`tts_engine.predefined_voices_path` and `tts_engine.reference_audio_path` respectively) using `utils.safe_resolve_within()`. Traversal attempts (`..`, absolute paths, symlinks pointing outside the sandbox) return **HTTP 400** with no filesystem access. The fix addresses CWE-22 and shipped in v2.0.0.
 
 ---
 
