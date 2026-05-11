@@ -82,20 +82,21 @@ TURBO_PARALINGUISTIC_TAGS = [
 ]
 
 # --- BF16 optimization flag ---
-# TTS_BF16: controls whether T3/S3Gen are converted to bfloat16 and whether
-# autocast is used during inference.
-#   auto (default) — enable only if torch.cuda.is_bf16_supported()
-#   on / 1 / true  — force-enable (assumes hardware supports it)
-#   off / 0 / false — disable even if hardware supports it
+# TTS_BF16: controls whether T3 is converted to bfloat16 and whether
+# autocast is used during inference. Off by default so existing users
+# see no behavior change on upgrade — opt in for the speedup.
+#   off (default) — keep T3 in float32, no autocast
+#   on / 1 / true  — force-enable (assumes hardware supports bf16)
+#   auto           — enable only if torch.cuda.is_bf16_supported()
 def _resolve_bf16_setting() -> bool:
-    val = os.environ.get("TTS_BF16", "auto").strip().lower()
-    if val in ("off", "0", "false"):
-        return False
+    val = os.environ.get("TTS_BF16", "off").strip().lower()
     if val in ("on", "1", "true"):
         return True
-    # auto: detect at runtime
-    if torch.cuda.is_available():
-        return torch.cuda.is_bf16_supported()
+    if val == "auto":
+        if torch.cuda.is_available():
+            return torch.cuda.is_bf16_supported()
+        return False
+    # off / 0 / false / anything else
     return False
 
 BF16_ENABLED: bool = _resolve_bf16_setting()
@@ -342,7 +343,7 @@ def load_model() -> bool:
         logger.info(f"Final device selection: {model_device}")
         logger.info(
             f"BF16 optimization: {'enabled' if BF16_ENABLED else 'disabled'} "
-            f"(TTS_BF16={os.environ.get('TTS_BF16', 'auto')})"
+            f"(TTS_BF16={os.environ.get('TTS_BF16', 'off')})"
         )
 
         # Get the model selector from config
