@@ -5,6 +5,8 @@
 
 import os
 import io
+import asyncio
+import struct
 import logging
 import logging.handlers  # For RotatingFileHandler
 import shutil
@@ -384,6 +386,25 @@ def _remove_dc_offset(
     except Exception as e:
         logger.error(f"DC offset removal failed: {e}")
         return audio.astype(np.float32, copy=False)
+
+
+def _create_wav_header(sample_rate: int, num_channels: int = 1, bits_per_sample: int = 16) -> bytes:
+    """Build a WAV header with 0xFFFFFFFF data size for streaming (size unknown upfront)."""
+    byte_rate = sample_rate * num_channels * bits_per_sample // 8
+    block_align = num_channels * bits_per_sample // 8
+    header = struct.pack("<4sI4s", b"RIFF", 0xFFFFFFFF, b"WAVE")
+    fmt_chunk = struct.pack(
+        "<4sIHHIIHH",
+        b"fmt ", 16, 1, num_channels, sample_rate, byte_rate, block_align, bits_per_sample,
+    )
+    data_header = struct.pack("<4sI", b"data", 0xFFFFFFFF)
+    return header + fmt_chunk + data_header
+
+
+def _float32_to_pcm16(audio_np: np.ndarray) -> bytes:
+    """Convert a float32 numpy array in [-1, 1] to int16 PCM bytes."""
+    clipped = np.clip(audio_np, -1.0, 1.0)
+    return (clipped * 32767).astype(np.int16).tobytes()
 
 
 # --- End Audio Stitching Helper Functions ---
@@ -952,6 +973,99 @@ async def custom_tts_endpoint(
         raise HTTPException(
             status_code=400, detail="Text processing resulted in no usable chunks."
         )
+
+    # --- Streaming fork ---
+    if request.stream:
+        if request.output_format and request.output_format != "wav":
+            logger.warning(
+                f"stream=true: output_format '{request.output_format}' ignored; streaming always uses WAV."
+            )
+
+        speed_factor_stream = (
+            request.speed_factor
+            if request.speed_factor is not None
+            else get_gen_default_speed_factor()
+        )
+        audio_prompt_str = (
+            str(audio_prompt_path_for_engine) if audio_prompt_path_for_engine else None
+        )
+        temperature_val = (
+            request.temperature if request.temperature is not None else get_gen_default_temperature()
+        )
+        exaggeration_val = (
+            request.exaggeration if request.exaggeration is not None else get_gen_default_exaggeration()
+        )
+        cfg_weight_val = (
+            request.cfg_weight if request.cfg_weight is not None else get_gen_default_cfg_weight()
+        )
+        seed_val = request.seed if request.seed is not None else get_gen_default_seed()
+        language_val = (
+            request.language if request.language is not None else get_gen_default_language()
+        )
+
+        CROSSFADE_MS_STREAM = 20
+
+        async def _stream_generator():
+            loop = asyncio.get_running_loop()
+            carry: Optional[np.ndarray] = None
+            header_sent = False
+
+            for i, chunk_text in enumerate(text_chunks):
+                is_last = i == len(text_chunks) - 1
+                logger.info(f"Streaming chunk {i+1}/{len(text_chunks)}...")
+
+                audio_tensor, chunk_sr = await loop.run_in_executor(
+                    None,
+                    lambda c=chunk_text: engine.synthesize(
+                        text=c,
+                        audio_prompt_path=audio_prompt_str,
+                        temperature=temperature_val,
+                        exaggeration=exaggeration_val,
+                        cfg_weight=cfg_weight_val,
+                        seed=seed_val,
+                        language=language_val,
+                    ),
+                )
+
+                if audio_tensor is None or chunk_sr is None:
+                    logger.error(f"Streaming TTS: engine returned None for chunk {i+1}; stopping stream.")
+                    return
+
+                if speed_factor_stream != 1.0:
+                    audio_tensor, _ = utils.apply_speed_factor(
+                        audio_tensor, chunk_sr, speed_factor_stream
+                    )
+
+                audio_np = audio_tensor.cpu().numpy().squeeze().astype(np.float32)
+
+                if not header_sent:
+                    yield _create_wav_header(chunk_sr)
+                    header_sent = True
+
+                fade_samples = int(CROSSFADE_MS_STREAM / 1000 * chunk_sr)
+
+                if carry is not None:
+                    # Crossfade the held-back tail of the previous chunk with the head of this one
+                    audio_np = _crossfade_with_overlap(carry, audio_np, fade_samples)
+                    carry = None
+
+                if not is_last and len(audio_np) > fade_samples:
+                    carry = audio_np[-fade_samples:].copy()
+                    yield _float32_to_pcm16(audio_np[:-fade_samples])
+                else:
+                    yield _float32_to_pcm16(audio_np)
+
+            if carry is not None:
+                yield _float32_to_pcm16(carry)
+
+        timestamp_str = time.strftime("%Y%m%d_%H%M%S")
+        stream_filename = utils.sanitize_filename(f"tts_stream_{timestamp_str}.wav")
+        return StreamingResponse(
+            _stream_generator(),
+            media_type="audio/wav",
+            headers={"Content-Disposition": f'attachment; filename="{stream_filename}"'},
+        )
+    # --- End streaming fork ---
 
     for i, chunk in enumerate(text_chunks):
         logger.info(f"Synthesizing chunk {i+1}/{len(text_chunks)}...")
