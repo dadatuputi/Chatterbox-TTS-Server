@@ -32,6 +32,23 @@ This server is based on the architecture and UI of our [Dia-TTS-Server](https://
 
 ## 🆕 What's New
 
+### 🚀 v2.0.0 highlights (new)
+
+v2.0 ships the complete Chatterbox family on every major GPU stack behind one OpenAI-compatible API and Web UI. The headline themes:
+
+- **DGX Spark / sm_121 support** via the new `docker-compose-cu130.yml` (CUDA 13.0, PyTorch 2.10). RTX 30/40/50 keep using cu121 / cu128.
+- **AMD Strix Halo support** via `docker-compose-strixhalo.yml` (ROCm 7.2, `HSA_OVERRIDE_GFX_VERSION=11.0.0`).
+- **Streaming `/tts` endpoint** — opt-in `stream: true` parameter returns a `StreamingResponse` that flushes WAV bytes per chunk with 20 ms crossfades. Default behavior unchanged.
+- **Voice conditioning cache** — repeated requests against the same reference voice skip re-encoding. Real latency win for batch / OpenAI-endpoint workflows.
+- **Opt-in BF16 inference** — `TTS_BF16=on` (or `=auto`) converts T3 to bfloat16 and runs under autocast for ~40% throughput on bf16-capable GPUs. Default `off` to preserve existing behavior on upgrade.
+- **HTTPS / SSL** — optional `ssl_certfile` and `ssl_keyfile` in `config.yaml` for direct HTTPS without a reverse proxy.
+- **Security: CWE-22 path traversal fixed** on `/tts` and `/v1/audio/speech` voice file parameters. Traversal attempts return HTTP 400.
+- **New endpoints** — `/api/unload` (release GPU memory without restart) and `/v1/audio/voices` (OpenAI-compatible voice listing).
+- **Dynamic language selector** — the UI populates the language dropdown from `SUPPORTED_LANGUAGES` exposed by the multilingual engine.
+- **Chunker fix** — stray dashes in narrative text no longer get treated as bullet items that swallow the rest of the paragraph (#144).
+
+See the [v2.0.0 release notes](https://github.com/devnen/Chatterbox-TTS-Server/releases/tag/v2.0.0) for the full list with contributor credits.
+
 ### 📦 Portable Mode for Windows (new)
 
 - The launcher now offers **Portable Mode** for all Windows users during first-time setup — selected by default.
@@ -251,8 +268,10 @@ This server application enhances the underlying `chatterbox-tts` engine with the
 |----------|--------------------|--------------------|-------------------|
 | CPU Only | `--cpu` | requirements.txt | None |
 | NVIDIA RTX 20/30/40 | `--nvidia` | requirements-nvidia.txt | 525+ |
-| NVIDIA RTX 5090 / Blackwell | `--nvidia-cu128` | requirements-nvidia-cu128.txt | 570+ |
+| NVIDIA RTX 5090 / Blackwell (sm_120) | `--nvidia-cu128` | requirements-nvidia-cu128.txt (torch 2.9, CUDA 12.8) | 570+ |
+| NVIDIA DGX Spark / GB10 (sm_121) | Docker only | requirements-nvidia-cu130.txt (torch 2.10, CUDA 13.0) | 580+ |
 | AMD RX 6000/7000 (Linux) | `--rocm` | requirements-rocm.txt | ROCm 6.4+ |
+| AMD Strix Halo (Ryzen AI MAX+) | Docker only | requirements-strixhalo.txt (ROCm 7.2) | ROCm 7.2+ |
 | Apple Silicon (M1/M2/M3/M4) | Manual install | See Option 4 | macOS 12.3+ |
 
 ---
@@ -570,6 +589,27 @@ See [README_CUDA128.md](README_CUDA128.md) for detailed setup instructions and t
 
 ---
 
+### **Option 2c: NVIDIA GPU with CUDA 13.0 (DGX Spark / sm_121)**
+
+> **Note:** Use this for **NVIDIA DGX Spark / GB10** hardware (compute capability `sm_121`). RTX 5090 stays on cu128 (Option 2b); RTX 30/40 stays on cu121 (Option 2).
+
+For users on the very latest NVIDIA stack who need CUDA 13.0 and PyTorch 2.10.
+
+**Prerequisites:**
+- NVIDIA DGX Spark / GB10 or other sm_121-capable hardware
+- CUDA 13.0+ drivers (driver version 580+)
+
+**Using Docker (recommended):**
+```bash
+docker compose -f docker-compose-cu130.yml up -d
+
+# Access the web UI at http://localhost:8004
+```
+
+The `Dockerfile.cu130` installs PyTorch 2.10.0+cu130 with chatterbox-v2 via `--no-deps` so PyTorch is not downgraded.
+
+---
+
 ### **Option 3: AMD GPU Installation (ROCm)**
 
 For users with modern, ROCm-compatible AMD GPUs.
@@ -663,6 +703,25 @@ Apple Silicon requires a specific installation sequence due to dependency confli
 
 ---
 
+### **Option 5: AMD Strix Halo (Ryzen AI MAX+) Installation**
+
+> **Note:** Use this for AMD **Strix Halo** APUs (Ryzen AI MAX+ 395 / "Ryzen AI Max" with integrated Radeon 8060S, GFX 11.5.0). Standard discrete Radeon GPUs use Option 3 (ROCm).
+
+**Prerequisites:**
+- AMD Strix Halo APU on Linux
+- ROCm 7.2+ stack installed on the host
+
+**Using Docker (recommended):**
+```bash
+docker compose -f docker-compose-strixhalo.yml up -d
+
+# Access the web UI at http://localhost:8004
+```
+
+The compose file sets `HSA_OVERRIDE_GFX_VERSION=11.0.0` and `HSA_XNACK=1` so the ROCm 7.2 wheels work on Strix Halo's GFX 11.5.0 silicon, and enables `TTS_BF16=on` for the throughput win on this hardware.
+
+---
+
 ## 🚀 Live Demo - Try It Now! (Google Colab)
 
 **Want to test Chatterbox TTS Server immediately without any installation?**
@@ -715,6 +774,30 @@ The server relies exclusively on `config.yaml` for runtime configuration.
 *   `debug`: `save_intermediate_audio`.
 
 ⭐ **Remember:** Changes made to `server`, `model`, `tts_engine`, or `paths` sections in `config.yaml` (or via the UI's Server Configuration section) **require a server restart** to take effect. Changes to `generation_defaults` or `ui_state` are applied dynamically or on the next page load.
+
+**Model selection:** set `model.repo_id` to one of:
+
+- `chatterbox` (or `original`) — Original 0.5B English model with emotion exaggeration.
+- `chatterbox-turbo` (or `turbo`) — 350M Turbo model with paralinguistic tags (`[laugh]`, `[cough]`, `[chuckle]`).
+- `chatterbox-multilingual` (or `multilingual`) — 0.5B multilingual model with 23-language support.
+
+All three are hot-swappable from the Web UI engine dropdown without a server restart.
+
+## 🔐 Security
+
+- Voice file parameters on `/tts` (`predefined_voice_id`, `reference_audio_filename`) and `/v1/audio/speech` (`voice`) are sandboxed under their configured directories using `utils.safe_resolve_within()`.
+- Path traversal attempts (`..`, absolute paths, symlinks pointing outside the sandbox) return **HTTP 400** with no filesystem access. The fix addresses CWE-22 and shipped in v2.0.0.
+- **Vulnerability reports:** please use the repo's Security tab → Report a vulnerability for private disclosure rather than opening a public issue.
+
+## ⚡ Performance tuning
+
+The server defaults are tuned for safety and broad compatibility. The following knobs trade safety for speed when you understand your hardware:
+
+- **BF16 inference** — set environment variable `TTS_BF16=on` (or `=auto` for "enable only if the GPU reports `is_bf16_supported()`") to convert T3 to bfloat16 and run `generate()` under autocast. Roughly 40% throughput on bf16-capable GPUs (RTX 30/40/50, A100, H100, Strix Halo). Default is `off` to preserve existing behavior on upgrade. Output is numerically slightly different from float32 but typically inaudible.
+- **Voice conditioning cache** — repeated requests against the same reference voice skip re-encoding. Cache is keyed by `(path, mtime, exaggeration)` and is automatically cleared on `reload_model()` / `/api/unload`. No config needed.
+- **Chunk size** — `chunk_size` parameter on `/tts` (50–500, default 120). Larger chunks = fewer requests but more VRAM per call. The chunker respects sentence boundaries either way.
+- **Streaming** — `stream: true` on `/tts` for long-form input (audiobooks, multi-paragraph content). See the API section above for the chunk-level caveat.
+- **HTTPS** — set `server.ssl_certfile` and `server.ssl_keyfile` in `config.yaml` for direct HTTPS without putting a reverse proxy in front.
 
 ## ▶️ Running the Server
 
@@ -993,33 +1076,46 @@ Turbo supports native tags like `[laugh]`, `[cough]`, and `[chuckle]` for more r
 
 ### API Endpoints (`/docs` for interactive details)
 
-The primary endpoint for TTS generation is `/tts`, which offers detailed control over the synthesis process.
+The primary endpoint for TTS generation is `/tts`. The OpenAI-compatible `/v1/audio/speech` and `/v1/audio/voices` exist for drop-in replacement of OpenAI's TTS API.
 
-*   **`/tts` (POST):** Main endpoint for speech generation.
-    *   **Request Body (`CustomTTSRequest`):**
-        *   `text` (string, required): Plain text to synthesize.
-        *   `voice_mode` (string, "predefined" or "clone", default "predefined"): Specifies voice source.
-        *   `predefined_voice_id` (string, optional): Filename of predefined voice (if `voice_mode` is "predefined").
-        *   `reference_audio_filename` (string, optional): Filename of reference audio (if `voice_mode` is "clone").
-        *   `output_format` (string, "wav" or "opus", default "wav").
-        *   `split_text` (boolean, default True): Whether to chunk long text.
-        *   `chunk_size` (integer, default 120): Target characters per chunk.
-        *   `temperature`, `exaggeration`, `cfg_weight`, `seed`, `speed_factor`, `language`: Generation parameters overriding defaults.
-    *   **Response:** Streaming audio (`audio/wav` or `audio/opus`).
-*   **`/v1/audio/speech` (POST):** OpenAI-compatible.
-    *   `input`: Text.
-    *   `voice`: 'S1', 'S2', 'dialogue', 'predefined_voice_filename.wav', or 'reference_filename.wav'.
-    *   `response_format`: 'opus' or 'wav'.
-    *   `speed`: Playback speed factor (0.5-2.0).
-    *   `seed`: (Optional) Integer seed, -1 for random.    
-*   **Helper Endpoints (mostly for UI):**
-    *   `GET /api/ui/initial-data`: Fetches all initial configuration, file lists, and presets for the UI.
-    *   `POST /save_settings`: Saves partial updates to `config.yaml`.
-    *   `POST /reset_settings`: Resets `config.yaml` to defaults.
-    *   `GET /get_reference_files`: Lists files in `reference_audio/`.
-    *   `GET /get_predefined_voices`: Lists formatted voices from `voices/`.
-    *   `POST /upload_reference`: Uploads reference audio files.
-    *   `POST /upload_predefined_voice`: Uploads predefined voice files.
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/tts` | POST | Custom TTS, full param set, supports `stream: true` (mp3 / wav / opus) |
+| `/v1/audio/speech` | POST | OpenAI-compatible TTS |
+| `/v1/audio/voices` | GET | OpenAI-compatible voice listing |
+| `/api/ui/initial-data` | GET | UI bootstrap + comprehensive health check |
+| `/api/model-info` | GET | Loaded model status, type, supported languages |
+| `/api/unload` | POST | Release GPU memory without restarting the server |
+| `/save_settings` | POST | Persist partial updates to `config.yaml` |
+| `/reset_settings` | POST | Reset `config.yaml` to defaults |
+| `/get_reference_files` | GET | List files in `reference_audio/` |
+| `/get_predefined_voices` | GET | List formatted voices from `voices/` |
+| `/upload_reference` | POST | Upload reference audio files |
+| `/upload_predefined_voice` | POST | Upload predefined voice files |
+| `/docs` | GET | Interactive Swagger UI |
+
+**`/tts` request body (`CustomTTSRequest`):**
+
+- `text` (string, required) — plain text to synthesize.
+- `voice_mode` ("predefined" | "clone", default "predefined").
+- `predefined_voice_id` (string) — voice filename when `voice_mode=predefined`.
+- `reference_audio_filename` (string) — reference filename when `voice_mode=clone`.
+- `output_format` ("wav" | "mp3" | "opus", default "wav"). Ignored when `stream=true` (streaming always uses WAV).
+- `split_text` (boolean, default `true`) — chunk long text by sentence.
+- `chunk_size` (integer 50–500, default 120).
+- `stream` (boolean, default `false`) — if true, returns a `StreamingResponse` that flushes WAV bytes as each chunk is synthesized.
+- `temperature`, `exaggeration`, `cfg_weight`, `seed`, `speed_factor`, `language` — generation parameters that override defaults.
+
+**Streaming caveat:** the underlying Chatterbox model synthesizes a full chunk in one forward pass, so `stream=true` is **chunk-level**, not token-level. For short text (1 chunk) it gives no time-to-first-byte benefit. For long-form / audiobook input (many chunks) the client can start playback as soon as chunk 1 is ready while later chunks render in the background.
+
+**Example — streaming TTS:**
+
+```bash
+curl -X POST http://localhost:8004/tts \
+  -H "Content-Type: application/json" \
+  -d '{"text":"The first chunk arrives quickly, the rest stream behind.","stream":true}' \
+  --output stream.wav
+```
 # 🐳 Docker Installation
 
 Run Chatterbox TTS Server easily using Docker. The recommended method uses Docker Compose, which is pre-configured for different GPU types.
@@ -1045,9 +1141,19 @@ cd Chatterbox-TTS-Server
 ### 2. Start the Container Based on Your Hardware
 
 #### **For NVIDIA GPU:**
-The default `docker-compose.yml` is configured for NVIDIA GPUs.
+The default `docker-compose.yml` is configured for NVIDIA RTX 20/30/40 series (CUDA 12.1).
 ```bash
 docker compose up -d --build
+```
+
+For **RTX 50 series / Blackwell (sm_120)** use the cu128 compose file:
+```bash
+docker compose -f docker-compose-cu128.yml up -d --build
+```
+
+For **DGX Spark / GB10 (sm_121)** use the cu130 compose file:
+```bash
+docker compose -f docker-compose-cu130.yml up -d --build
 ```
 
 #### **For AMD ROCm GPU (Linux only):**
@@ -1061,6 +1167,11 @@ sudo usermod -a -G video,render $USER
 **Start the container:**
 ```bash
 docker compose -f docker-compose-rocm.yml up -d --build
+```
+
+For **AMD Strix Halo (Ryzen AI MAX+)** use the dedicated compose file:
+```bash
+docker compose -f docker-compose-strixhalo.yml up -d --build
 ```
 
 #### **For CPU-only:**
