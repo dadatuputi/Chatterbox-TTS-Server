@@ -2,7 +2,7 @@
 
 ## Overview
 
-This guide provides instructions for running Chatterbox TTS Server with **CUDA 12.8 and PyTorch 2.8.0**, which includes support for the new **RTX 5090 and Blackwell architecture (sm_120)** GPUs.
+This guide provides instructions for running Chatterbox TTS Server with **CUDA 12.8 and PyTorch 2.9.0**, which includes support for the new **RTX 5090 and Blackwell architecture (sm_120)** GPUs.
 
 ## Who Needs This?
 
@@ -113,7 +113,7 @@ source venv/bin/activate
 # Upgrade pip
 pip install --upgrade pip
 
-# Install dependencies (PyTorch 2.8.0 + other requirements)
+# Install dependencies (PyTorch 2.9.0 + other requirements)
 pip install -r requirements-nvidia-cu128.txt
 
 # IMPORTANT: Install Chatterbox separately with --no-deps
@@ -139,7 +139,7 @@ python -c "import torch; print(f'PyTorch: {torch.__version__}'); print(f'CUDA Av
 
 Expected output should include:
 ```
-PyTorch: 2.8.0+cu128
+PyTorch: 2.9.0+cu128
 CUDA Available: True
 GPU: NVIDIA GeForce RTX 5090
 Supported Architectures: ['sm_70', 'sm_75', 'sm_80', 'sm_86', 'sm_90', 'sm_100', 'sm_120']
@@ -153,7 +153,7 @@ The CUDA 12.8 configuration differs from the standard CUDA 12.1 setup:
 
 | Aspect | CUDA 12.1 (Standard) | CUDA 12.8 (Blackwell) |
 |--------|---------------------|----------------------|
-| PyTorch Version | 2.5.1 | 2.8.0 |
+| PyTorch Version | 2.5.1 | 2.9.0 |
 | CUDA Version | 12.1 | 12.8 |
 | Blackwell Support | ❌ No | ✅ Yes (sm_120) |
 | Requirements File | requirements-nvidia.txt | requirements-nvidia-cu128.txt |
@@ -192,7 +192,7 @@ This error means PyTorch doesn't support your GPU's compute capability. This typ
    ```bash
    python -c "import torch; print(torch.__version__)"
    ```
-   Should show `2.8.0+cu128` or similar with `cu128`.
+   Should show `2.9.0+cu128` or similar with `cu128`.
 
 2. **PyTorch was downgraded** - This can happen if Chatterbox was installed without `--no-deps`. Reinstall:
    ```bash
@@ -200,7 +200,7 @@ This error means PyTorch doesn't support your GPU's compute capability. This typ
    python start.py --reinstall --nvidia-cu128
    
    # Or manually
-   pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 --index-url https://download.pytorch.org/whl/cu128
+   pip install torch==2.9.0 torchvision==0.24.0 torchaudio==2.9.0 --index-url https://download.pytorch.org/whl/cu128
    pip install --no-deps git+https://github.com/devnen/chatterbox-v2.git@master
    ```
 
@@ -260,7 +260,8 @@ Subsequent starts will be much faster.
 
 | GPU Generation | Architecture | Compute Capability | Installation Option | PyTorch Version |
 |----------------|--------------|-------------------|---------------------|-----------------|
-| RTX 5090 / Blackwell | Blackwell | sm_120 | `--nvidia-cu128` | 2.8.0+cu128 |
+| RTX 5090 / Blackwell | Blackwell | sm_120 | `--nvidia-cu128` | 2.9.0+cu128 |
+| DGX Spark / GB10 | Blackwell | sm_121 | Docker `cu130` | 2.10.0+cu130 |
 | RTX 4090 / Ada | Ada Lovelace | sm_89 | `--nvidia` | 2.5.1+cu121 |
 | RTX 3090 / Ampere | Ampere | sm_86 | `--nvidia` | 2.5.1+cu121 |
 | RTX 2080 / Turing | Turing | sm_75 | `--nvidia` | 2.5.1+cu121 |
@@ -325,6 +326,11 @@ docker compose -f docker-compose-cu128.yml down
 # Start standard container
 docker compose up -d
 ```
+
+## See also
+
+- For **DGX Spark / GB10 (sm_121)** which needs CUDA 13.0 + PyTorch 2.10, use `docker-compose-cu130.yml` instead. The general install flow in the main README's "Option 2c" covers it.
+- For **AMD Strix Halo (Ryzen AI MAX+)**, see `docker-compose-strixhalo.yml` and "Option 5" in the main README.
 
 ## Additional Resources
 
