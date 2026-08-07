@@ -90,6 +90,17 @@ document.addEventListener('DOMContentLoaded', async function () {
     const cloneImportButton = document.getElementById('clone-import-button');
     const cloneRefreshButton = document.getElementById('clone-refresh-button');
     const cloneFileInput = document.getElementById('clone-file-input');
+    // Feature A: URL/file reference import panel
+    const urlImportPanel = document.getElementById('url-import-panel');
+    const importSourceInput = document.getElementById('import-source');
+    const importSegmentsInput = document.getElementById('import-segments');
+    const importNameInput = document.getElementById('import-name');
+    const importCookiesInput = document.getElementById('import-cookies');
+    const importPreviewButton = document.getElementById('import-preview-button');
+    const importCommitButton = document.getElementById('import-commit-button');
+    const importStatus = document.getElementById('import-status');
+    const importPreviewAudio = document.getElementById('import-preview-audio');
+    let appCapabilities = {};
     const presetsContainer = document.getElementById('presets-container');
     const presetsPlaceholder = document.getElementById('presets-placeholder');
     const temperatureSlider = document.getElementById('temperature');
@@ -616,6 +627,8 @@ document.addEventListener('DOMContentLoaded', async function () {
             appPresets = data.presets || [];
             initialReferenceFiles = data.reference_files || [];
             initialPredefinedVoices = data.predefined_voices || [];
+            appCapabilities = data.capabilities || {};
+            applyCapabilities();
             hideChunkWarning = currentUiState.hide_chunk_warning || false;
             hideGenerationWarning = currentUiState.hide_generation_warning || false;
             currentVoiceMode = currentUiState.last_voice_mode || 'predefined';
@@ -1466,6 +1479,117 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
         });
     }
+
+    // --- Feature A: URL / local-file reference import ---
+    function applyCapabilities() {
+        const importAvailable = appCapabilities?.import?.available;
+        if (urlImportPanel) {
+            urlImportPanel.classList.toggle('hidden', !importAvailable);
+        }
+    }
+
+    function setImportStatus(msg, type = 'info') {
+        if (!importStatus) return;
+        const colors = { info: '', success: 'var(--color-success, #2a7)', warning: 'var(--color-warning, #a70)', error: 'var(--color-danger, #c33)' };
+        importStatus.textContent = msg || '';
+        importStatus.style.color = colors[type] || '';
+    }
+
+    function buildImportFormData(preview) {
+        const source = (importSourceInput?.value || '').trim();
+        if (!source) {
+            setImportStatus('Enter a URL or local file path first.', 'error');
+            return null;
+        }
+        const fd = new FormData();
+        fd.append('url', source);
+        fd.append('segments', (importSegmentsInput?.value || '').trim());
+        fd.append('name', (importNameInput?.value || '').trim());
+        fd.append('cookies', importCookiesInput?.value || '');
+        fd.append('preview', preview ? 'true' : 'false');
+        return fd;
+    }
+
+    function setImportBusy(busy, activeButton, label) {
+        [importPreviewButton, importCommitButton].forEach(b => { if (b) b.disabled = busy; });
+        if (activeButton) {
+            if (busy) {
+                activeButton.dataset.originalText = activeButton.textContent;
+                activeButton.textContent = label || 'Working…';
+            } else if (activeButton.dataset.originalText) {
+                activeButton.textContent = activeButton.dataset.originalText;
+            }
+        }
+    }
+
+    async function handleImportPreview() {
+        const fd = buildImportFormData(true);
+        if (!fd) return;
+        setImportBusy(true, importPreviewButton, 'Fetching…');
+        setImportStatus('Fetching preview… this can take a moment for long sources.', 'info');
+        if (importPreviewAudio) importPreviewAudio.classList.add('hidden');
+        try {
+            const response = await fetch(`${API_BASE_URL}/import_reference_url`, { method: 'POST', body: fd });
+            if (!response.ok) {
+                let detail = `Preview failed (status ${response.status})`;
+                try { const j = await response.json(); detail = j.detail || detail; } catch (e) { }
+                throw new Error(detail);
+            }
+            const blob = await response.blob();
+            const warning = response.headers.get('X-Import-Warning');
+            const duration = response.headers.get('X-Import-Duration');
+            if (importPreviewAudio) {
+                if (importPreviewAudio.src) URL.revokeObjectURL(importPreviewAudio.src);
+                importPreviewAudio.src = URL.createObjectURL(blob);
+                importPreviewAudio.classList.remove('hidden');
+                importPreviewAudio.play().catch(() => { });
+            }
+            if (warning) {
+                setImportStatus(warning, 'warning');
+            } else {
+                setImportStatus(`Preview ready${duration ? ` (${parseFloat(duration).toFixed(1)}s)` : ''}. Adjust segments, or click Import to save.`, 'success');
+            }
+        } catch (error) {
+            console.error('Import preview error:', error);
+            setImportStatus(error.message, 'error');
+        } finally {
+            setImportBusy(false, importPreviewButton);
+        }
+    }
+
+    async function handleImportCommit() {
+        const name = (importNameInput?.value || '').trim();
+        if (!name) {
+            setImportStatus('Give the reference a name before importing.', 'error');
+            return;
+        }
+        const fd = buildImportFormData(false);
+        if (!fd) return;
+        setImportBusy(true, importCommitButton, 'Importing…');
+        setImportStatus('Importing…', 'info');
+        try {
+            const response = await fetch(`${API_BASE_URL}/import_reference_url`, { method: 'POST', body: fd });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.detail || `Import failed (status ${response.status})`);
+            initialReferenceFiles = result.all_reference_files || [];
+            populateReferenceFiles();
+            if (result.filename && cloneReferenceSelect && Array.from(cloneReferenceSelect.options).some(opt => opt.value === result.filename)) {
+                cloneReferenceSelect.value = result.filename;
+            }
+            setImportStatus(result.warning || result.message || 'Imported.', result.warning ? 'warning' : 'success');
+            showNotification(result.message || 'Reference imported.', 'success');
+            debouncedSaveState();
+        } catch (error) {
+            console.error('Import commit error:', error);
+            setImportStatus(error.message, 'error');
+            showNotification(`Import failed: ${error.message}`, 'error');
+        } finally {
+            setImportBusy(false, importCommitButton);
+        }
+    }
+
+    if (importPreviewButton) importPreviewButton.addEventListener('click', handleImportPreview);
+    if (importCommitButton) importCommitButton.addEventListener('click', handleImportCommit);
 
     if (predefinedVoiceRefreshButton && predefinedVoiceSelect) {
         predefinedVoiceRefreshButton.addEventListener('click', async () => {

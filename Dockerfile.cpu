@@ -31,6 +31,10 @@ RUN python3 -m pip install --no-cache-dir --upgrade pip && \
     python3 -m pip install --no-cache-dir "protobuf>=4.25.0"
 
 # Copy the rest of the application code
+# Optional: Feature A URL import (yt-dlp). ffmpeg is already installed above.
+COPY requirements-import.txt ./requirements-import.txt
+RUN python3 -m pip install --no-cache-dir -r requirements-import.txt
+
 COPY . .
 
 # Create required directories for the application

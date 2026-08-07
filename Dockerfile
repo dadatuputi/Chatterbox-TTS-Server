@@ -45,6 +45,10 @@ RUN pip3 install --no-cache-dir --upgrade pip && \
     pip3 install --no-cache-dir --no-deps git+https://github.com/devnen/chatterbox-v2.git@master s3tokenizer==0.3.0 onnx==1.16.0 && \
     pip3 install --no-cache-dir "protobuf>=4.25.0"
 # Copy the rest of the application code
+# Optional: Feature A URL import (yt-dlp). ffmpeg is already installed above.
+COPY requirements-import.txt ./requirements-import.txt
+RUN python3 -m pip install --no-cache-dir -r requirements-import.txt
+
 COPY . .
 
 # Create required directories for the application (fixed syntax error)

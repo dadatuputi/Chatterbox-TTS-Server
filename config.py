@@ -39,9 +39,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "host": "0.0.0.0",  # Host address for the server to listen on.
         "port": 8000,  # Port number for the server.
         "use_ngrok": False,  # Placeholder for ngrok integration (if used).
-        "use_auth": False,  # Placeholder for basic authentication (if used).
-        "auth_username": "user",  # Default username if authentication is enabled.
-        "auth_password": "password",  # Default password if authentication is enabled.
+        "use_auth": False,  # Enable HTTP Basic auth + optional bearer token for all routes.
+        "auth_username": "user",  # Username for HTTP Basic auth (browser/UI access).
+        "auth_password": "password",  # Plaintext password fallback. Prefer auth_password_hash.
+        "auth_password_hash": "",  # bcrypt hash of the password (preferred over auth_password).
+        "api_token": "",  # Optional bearer token for the /v1/audio/* API surface. Empty disables bearer auth.
         "log_file_path": str(
             DEFAULT_LOGS_PATH / "tts_server.log"
         ),  # Path to the server log file.
@@ -750,6 +752,25 @@ def get_ssl_config() -> Dict[str, str]:
         return {}
 
     return {"ssl_certfile": str(certpath), "ssl_keyfile": str(keypath)}
+
+
+def get_auth_config() -> Dict[str, Any]:
+    """Returns the HTTP auth configuration.
+
+    Keys:
+        enabled       (bool): whether auth is enforced on all routes.
+        username      (str):  HTTP Basic username.
+        password      (str):  plaintext password fallback (used only if no hash).
+        password_hash (str):  bcrypt hash of the password (preferred).
+        api_token     (str):  optional bearer token for the API surface.
+    """
+    return {
+        "enabled": config_manager.get_bool("server.use_auth", False),
+        "username": config_manager.get_string("server.auth_username", "user"),
+        "password": config_manager.get_string("server.auth_password", ""),
+        "password_hash": config_manager.get_string("server.auth_password_hash", ""),
+        "api_token": config_manager.get_string("server.api_token", ""),
+    }
 
 
 # Audio Output Settings Accessors

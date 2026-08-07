@@ -231,6 +231,71 @@
                                         Refresh
                                     </button>
                                 </div>
+
+                                <!-- Feature A: import a reference clip from a URL or local file -->
+                                <details id="url-import-panel" class="collapsible hidden" style="margin-top: 0.75rem;">
+                                    <summary class="collapsible__trigger">
+                                        <span>Import from URL / file (create a new reference)</span>
+                                        <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd"
+                                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                                clip-rule="evenodd" />
+                                        </svg>
+                                    </summary>
+                                    <div class="collapsible__content">
+                                        <p class="form-hint mb-2">
+                                            Pull a short clip from a YouTube (or any
+                                            <code class="code">yt-dlp</code>-supported) URL, or a local file path on
+                                            the server. Only the first ~10&nbsp;s of a reference is used for timbre, so
+                                            <strong>Preview</strong> first to pick the right window, then
+                                            <strong>Import</strong> to save it.
+                                        </p>
+                                        <div class="form-group">
+                                            <label for="import-source" class="form-label small">Source URL or local path</label>
+                                            <input type="text" id="import-source" class="form-input small"
+                                                placeholder="https://www.youtube.com/watch?v=…  or  /path/to/audio.mp3">
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="import-segments" class="form-label small">Segments</label>
+                                            <input type="text" id="import-segments" class="form-input small"
+                                                value="0:00-0:30"
+                                                placeholder='"0:30-1:00"  or  "1:20-1:50, 4:05-4:35"  or blank for whole file'>
+                                            <p class="form-hint">Formats: <code class="code">SS</code>,
+                                                <code class="code">MM:SS</code>, <code class="code">HH:MM:SS</code>.
+                                                Multiple windows are joined in order; the first one sets the prosody.</p>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="import-name" class="form-label small">Save as (name)</label>
+                                            <input type="text" id="import-name" class="form-input small"
+                                                placeholder="e.g. Narrator  (saved as Narrator.wav)">
+                                        </div>
+                                        <details class="collapsible">
+                                            <summary class="collapsible__trigger">
+                                                <span>Cookies (optional — age-gated / members-only)</span>
+                                                <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fill-rule="evenodd"
+                                                        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                                        clip-rule="evenodd" />
+                                                </svg>
+                                            </summary>
+                                            <div class="collapsible__content">
+                                                <textarea id="import-cookies" class="form-input small" rows="3"
+                                                    placeholder="Paste cookies.txt contents here — only needed for restricted sources."></textarea>
+                                            </div>
+                                        </details>
+                                        <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
+                                            <button type="button" id="import-preview-button" class="btn secondary">Preview</button>
+                                            <button type="button" id="import-commit-button" class="btn primary">Import</button>
+                                        </div>
+                                        <p id="import-status" class="form-hint" style="margin-top: 0.5rem;"></p>
+                                        <audio id="import-preview-audio" controls class="hidden"
+                                            style="width: 100%; margin-top: 0.5rem;"></audio>
+                                        <p class="form-hint" style="margin-top: 0.5rem;">
+                                            <strong>Consent &amp; use:</strong> only clone voices you have permission to
+                                            use. All output is Perth-watermarked and detectable as synthetic.
+                                        </p>
+                                    </div>
+                                </details>
                             </div>
 
                             <div class="form-group">

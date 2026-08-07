@@ -2,9 +2,17 @@ server:
   host: 0.0.0.0
   port: 8004
   use_ngrok: false
+  # --- HTTP authentication (Feature B). Off by default. ---
+  # When enabled, every route requires HTTP Basic auth (browser/UI) OR the bearer
+  # api_token (for the /v1/audio/* API). MUST be paired with TLS on any public URL.
   use_auth: false
   auth_username: user
+  # Prefer a bcrypt hash: generate one with `python generate_password_hash.py`.
+  auth_password_hash: ''
+  # Plaintext fallback, used only when auth_password_hash is empty (less secure).
   auth_password: password
+  # Optional bearer token for API clients (Open WebUI, scripts). Empty disables bearer auth.
+  api_token: ''
   log_file_path: logs/tts_server.log
   log_file_max_size_mb: 10
   log_file_backup_count: 5

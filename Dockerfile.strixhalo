@@ -53,6 +53,10 @@ RUN sed -i \
     /usr/local/lib/python3.10/dist-packages/chatterbox/models/voice_encoder/voice_encoder.py
 
 # Copy the rest of the application code
+# Optional: Feature A URL import (yt-dlp). ffmpeg is already installed above.
+COPY requirements-import.txt ./requirements-import.txt
+RUN python3 -m pip install --no-cache-dir -r requirements-import.txt
+
 COPY . .
 
 # Create required directories for the application (fixed syntax error)

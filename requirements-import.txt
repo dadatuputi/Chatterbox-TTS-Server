@@ -1,0 +1,15 @@
+# ============================================================================
+# OPTIONAL: Reference import from URL (Feature A)
+# ============================================================================
+# Installing this enables importing reference audio directly from YouTube (or any
+# yt-dlp-supported URL) with per-segment time selection. ffmpeg must also be present
+# on the system (the Docker images already include it).
+#
+# This is intentionally kept OUT of the core requirements so the TTS server does not
+# hard-depend on a media extractor that changes frequently. If yt-dlp is not
+# installed, the URL-import panel is hidden and the server runs normally; local-file
+# import still works with ffmpeg alone.
+#
+#   pip install -r requirements-import.txt
+#
+yt-dlp>=2024.1.0

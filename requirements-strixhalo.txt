@@ -19,6 +19,7 @@ pydantic
 python-dotenv # Used ONLY for initial config seeding if config.yaml missing
 Jinja2
 python-multipart # For file uploads
+bcrypt>=4.0.0 # Optional: Feature B password hashing
 requests # For health checks or other potential uses
 PyYAML # For parsing presets.yaml AND primary config.yaml
 tqdm

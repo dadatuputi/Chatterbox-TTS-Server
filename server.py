@@ -10,6 +10,7 @@ import struct
 import logging
 import logging.handlers  # For RotatingFileHandler
 import shutil
+import subprocess
 import time
 import uuid
 import yaml  # For loading presets
@@ -35,6 +36,7 @@ from fastapi.responses import (
     JSONResponse,
     StreamingResponse,
     FileResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -60,8 +62,11 @@ from config import (
     get_audio_sample_rate,
     get_full_config_for_template,
     get_audio_output_format,
+    get_auth_config,
 )
 
+import auth  # HTTP Basic / bearer-token middleware (Feature B)
+import voice_import  # URL / local reference import (Feature A)
 import engine  # TTS Engine interface
 from models import (  # Pydantic models
     CustomTTSRequest,
@@ -185,9 +190,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=get_ui_title(),
     description="Text-to-Speech server with advanced UI and API capabilities.",
-    version="2.0.2",  # Version Bump
+    version="2.1.0",  # Adds Feature A (URL reference import) and Feature B (HTTP auth)
     lifespan=lifespan,
 )
+
+# --- Authentication Middleware (Feature B) ---
+# Off by default; enabled via config.yaml (server.use_auth). Covers ALL routes so a
+# route added later is protected without needing a decorator. Added before CORS so
+# that CORS remains the outermost layer and successful responses keep CORS headers.
+app.add_middleware(auth.AuthMiddleware, config_provider=get_auth_config)
 
 # --- CORS Middleware ---
 app.add_middleware(
@@ -487,6 +498,7 @@ async def get_ui_initial_data():
             "submittedCloneFile": None,
         }
 
+        auth_cfg = get_auth_config()
         return {
             "config": full_config,
             "reference_files": reference_files,
@@ -494,6 +506,11 @@ async def get_ui_initial_data():
             "presets": loaded_presets,
             "initial_gen_result": initial_gen_result_placeholder,
             "model_info": model_info,  # NEW: Include model information
+            # Feature A/B capability flags for the UI to enable/hide panels.
+            "capabilities": {
+                "import": voice_import.import_capabilities(),
+                "auth_enabled": bool(auth_cfg.get("enabled")),
+            },
         }
     except Exception as e:
         logger.error(f"Error preparing initial UI data for API: {e}", exc_info=True)
@@ -749,6 +766,143 @@ async def upload_reference_audio_endpoint(files: List[UploadFile] = File(...)):
             f"Upload to /upload_reference completed with {len(upload_errors)} error(s)."
         )
     return JSONResponse(content=response_data, status_code=status_code)
+
+
+@app.post("/import_reference_url", tags=["File Management"])
+async def import_reference_url_endpoint(
+    request: Request,
+    url: str = Form(..., description="YouTube (or any yt-dlp-supported) URL, or a local path."),
+    segments: str = Form("", description='"0:30-1:00" | "1:20-1:50, 4:05-4:35" | "" for whole file.'),
+    name: str = Form("", description="Destination filename stem (required unless preview)."),
+    preview: bool = Form(False, description="If true, return the audio without saving it."),
+    cookies: str = Form("", description="Optional cookies.txt contents for age-gated/members-only sources."),
+):
+    """Feature A: import reference audio from a URL or local file, selecting time windows.
+
+    Only the requested windows are downloaded (yt-dlp --download-sections), then joined
+    with the ffmpeg concat demuxer. With preview=true the joined audio is returned for
+    playback and nothing is written; otherwise it is saved into the reference-audio dir.
+    """
+    # Admin gating: when auth is enabled, arbitrary-audio import is admin-only. A caller
+    # authenticated via bearer token (API surface) or an anonymous request is refused.
+    auth_cfg = get_auth_config()
+    if auth_cfg.get("enabled") and not getattr(request.state, "is_admin", False):
+        raise HTTPException(
+            status_code=403,
+            detail="Reference import is restricted to the admin user.",
+        )
+
+    caps = voice_import.import_capabilities()
+    if not caps["available"]:
+        raise HTTPException(
+            status_code=503,
+            detail="Reference import is unavailable: ffmpeg is not installed on the server.",
+        )
+
+    url = (url or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="A URL or local file path is required.")
+
+    is_local = voice_import.is_local_source(url)
+    if not is_local and not caps["yt_dlp"]:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "URL import is unavailable: yt-dlp is not installed. Install it with "
+                "'pip install -r requirements-import.txt', or supply a local file path."
+            ),
+        )
+
+    # Parse segments up front so a bad spec fails fast with a clear message.
+    try:
+        segs = voice_import.parse_segments(segments)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    ref_dir = get_reference_audio_path(ensure_absolute=True)
+
+    # Resolve the destination (commit mode) before doing expensive work.
+    dest_path: Optional[Path] = None
+    if not preview:
+        if not name.strip():
+            raise HTTPException(
+                status_code=400, detail="A destination name is required to save the reference."
+            )
+        stem = Path(name.strip()).stem  # drop any extension / path the user typed
+        try:
+            dest_path = utils.safe_resolve_within(ref_dir, f"{stem}.wav")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    work_dir = voice_import.make_work_dir()
+    tmp_out = os.path.join(work_dir, "_reference.wav")
+    cookies_path = ""
+    try:
+        if cookies.strip():
+            cookies_path = os.path.join(work_dir, "cookies.txt")
+            with open(cookies_path, "w", encoding="utf-8") as f:
+                f.write(cookies)
+
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                None,
+                lambda: voice_import.fetch_reference(url, segs, tmp_out, work_dir, cookies_path),
+            )
+        except voice_import.ImportError_ as e:
+            raise HTTPException(status_code=422, detail=str(e))
+        except subprocess.TimeoutExpired:
+            raise HTTPException(status_code=504, detail="Import timed out while fetching/processing audio.")
+
+        if not os.path.exists(tmp_out):
+            raise HTTPException(status_code=422, detail="Import produced no audio.")
+
+        # Duration for the too-short warning (A6).
+        try:
+            duration = float(librosa.get_duration(path=tmp_out))
+        except Exception:
+            duration = 0.0
+        warning = ""
+        if 0 < duration < 6.0:
+            warning = (
+                f"Reference is only {duration:.1f}s — under 6s is too short for a stable "
+                "clone. Widen the segment for better results."
+            )
+
+        if preview:
+            # Return the joined audio for playback; write nothing to reference_audio.
+            with open(tmp_out, "rb") as f:
+                audio_bytes = f.read()
+            headers = {
+                "X-Import-Duration": f"{duration:.2f}",
+                "X-Import-Preview": "true",
+            }
+            if warning:
+                headers["X-Import-Warning"] = warning
+            return Response(content=audio_bytes, media_type="audio/wav", headers=headers)
+
+        # Commit mode: move into the reference-audio dir and validate.
+        assert dest_path is not None
+        shutil.move(tmp_out, dest_path)
+        max_duration = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
+        is_valid, validation_msg = utils.validate_reference_audio(dest_path, max_duration)
+        if not is_valid:
+            dest_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=validation_msg)
+
+        logger.info(f"Imported reference audio to: {dest_path} ({duration:.1f}s)")
+        return JSONResponse(
+            content={
+                "message": f"Imported '{dest_path.name}' ({duration:.1f}s).",
+                "filename": dest_path.name,
+                "duration": round(duration, 2),
+                "warning": warning,
+                "all_reference_files": utils.get_valid_reference_files(),
+            },
+            status_code=200,
+        )
+    finally:
+        voice_import.cleanup_work_dir(work_dir)
 
 
 @app.post("/upload_predefined_voice", tags=["File Management"])
