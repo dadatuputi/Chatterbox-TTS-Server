@@ -1,0 +1,27 @@
+---
+# Authelia users. Passwords MUST be argon2 hashes — never plaintext.
+#
+# Generate a hash:
+#   docker run --rm authelia/authelia:4.38 \
+#     authelia crypto hash generate argon2 --password 'your-password'
+# Paste the resulting "$argon2id$..." string as the password value.
+#
+# 'admins' group members can create/import voices; put friends in 'users'.
+
+users:
+  admin:
+    disabled: false
+    displayname: 'Admin'
+    password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_WITH_GENERATED_HASH'
+    email: 'admin@example.com'
+    groups:
+      - admins
+
+  # Example friend — read/generate only, no voice creation.
+  # friend:
+  #   disabled: false
+  #   displayname: 'Friend'
+  #   password: '$argon2id$v=19$m=65536,t=3,p=4$REPLACE_WITH_GENERATED_HASH'
+  #   email: 'friend@example.com'
+  #   groups:
+  #     - users

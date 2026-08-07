@@ -1,0 +1,90 @@
+# Chatterbox-TTS-Server + Authelia + Caddy, one stack.
+#
+#   cp .env.example .env      # then edit it
+#   docker compose -f docker-compose.authelia.yml up -d --build
+#
+# Only Caddy is published to the host (80/443). The app, Authelia and Redis live
+# on an internal network and are unreachable except through Caddy.
+
+name: chatterbox-authelia
+
+networks:
+  proxynet:
+    driver: bridge
+
+volumes:
+  hf_cache:
+  caddy_data:
+  caddy_config:
+  redis_data:
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - APP_DOMAIN=${APP_DOMAIN}
+      - AUTH_DOMAIN=${AUTH_DOMAIN}
+      - API_TOKEN=${API_TOKEN}
+      - ACME_EMAIL=${ACME_EMAIL:-}
+    networks: [proxynet]
+    depends_on: [authelia, chatterbox-tts-server]
+
+  authelia:
+    image: authelia/authelia:4.38
+    restart: unless-stopped
+    volumes:
+      - ./authelia:/config
+    environment:
+      # Secrets are injected here, never written into configuration.yml.
+      - AUTHELIA_SESSION_SECRET=${AUTHELIA_SESSION_SECRET}
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY=${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+      - AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET=${AUTHELIA_JWT_SECRET}
+    networks: [proxynet]
+    depends_on: [redis]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks: [proxynet]
+
+  chatterbox-tts-server:
+    build:
+      context: ../..
+      dockerfile: ${APP_DOCKERFILE:-Dockerfile}
+      args:
+        RUNTIME: nvidia
+    restart: unless-stopped
+    # No host 'ports:' — reachable only via Caddy on the internal network.
+    expose:
+      - "8004"
+    volumes:
+      - ../../config.yaml:/app/config.yaml
+      - ../../voices:/app/voices
+      - ../../reference_audio:/app/reference_audio
+      - ../../outputs:/app/outputs
+      - ../../logs:/app/logs
+      - hf_cache:/app/hf_cache
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks: [proxynet]
+    # --- GPU (NVIDIA). Delete this block when using Dockerfile.cpu. ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

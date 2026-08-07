@@ -1,0 +1,5 @@
+# Never commit real secrets or Authelia runtime state.
+.env
+authelia/db.sqlite3
+authelia/notification.txt
+authelia/*.log

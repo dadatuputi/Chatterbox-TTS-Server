@@ -1,0 +1,47 @@
+# Caddy reverse proxy for Chatterbox-TTS-Server behind Authelia.
+#
+# Two policies, routed by path:
+#   /v1/*   -> stateless bearer token (machine API; never redirect to a login page)
+#   /*      -> Authelia forward-auth (browser UI; login form + session cookie)
+#
+# The app itself is NOT published to the host (see the compose file) — every
+# request must pass through here, so the auth cannot be bypassed.
+
+{
+	# Certificate registration contact. Harmless if blank.
+	email {$ACME_EMAIL}
+}
+
+# ---------------------------------------------------------------------------
+# TTS application
+# ---------------------------------------------------------------------------
+{$APP_DOMAIN} {
+	# For internal-only deployments without public DNS, replace Caddy's automatic
+	# HTTPS by uncommenting the next line (browsers must then trust Caddy's local CA):
+	# tls internal
+
+	# --- Machine API: stateless bearer token, no login redirect ---
+	@api path /v1/*
+	handle @api {
+		@unauthorized not header Authorization "Bearer {$API_TOKEN}"
+		respond @unauthorized "Unauthorized" 401
+		reverse_proxy chatterbox-tts-server:8004
+	}
+
+	# --- Everything else (web UI): Authelia login form + session ---
+	handle {
+		forward_auth authelia:9091 {
+			uri /api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+		}
+		reverse_proxy chatterbox-tts-server:8004
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Authelia login portal
+# ---------------------------------------------------------------------------
+{$AUTH_DOMAIN} {
+	# tls internal   # (match the app site if you use internal TLS)
+	reverse_proxy authelia:9091
+}

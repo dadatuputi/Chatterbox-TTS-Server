@@ -1,0 +1,91 @@
+---
+# Authelia configuration (targets Authelia 4.38).
+# Secrets (session, storage encryption, jwt) are supplied via environment
+# variables in the compose file — do NOT put them here.
+#
+# Edit the three domain names below to match your .env (tts./auth./parent).
+
+theme: 'light'
+
+server:
+  address: 'tcp://:9091'
+
+log:
+  level: 'info'
+
+totp:
+  # Shown in the authenticator app. Use your app domain.
+  issuer: 'tts.example.com'
+
+authentication_backend:
+  # Self-service password reset is off; you manage users in users_database.yml.
+  password_reset:
+    disable: true
+  file:
+    path: '/config/users_database.yml'
+    password:
+      algorithm: 'argon2'
+
+# ---------------------------------------------------------------------------
+# Access control. Rules are evaluated top-down; the FIRST match wins.
+#
+# This implements the spec's admin/friends split:
+#   * Only the 'admins' group may create voices (import from URL, upload
+#     references / predefined voices).
+#   * Everyone who logs in gets the rest of the UI (browse voices, generate).
+# To drop the split, delete the first two rules and keep only the last one.
+# To require TOTP for everyone, change 'one_factor' to 'two_factor'.
+# ---------------------------------------------------------------------------
+access_control:
+  default_policy: 'deny'
+  rules:
+    # Voice-creation endpoints — admins only.
+    - domain: 'tts.example.com'
+      resources:
+        - '^/import_reference_url.*$'
+        - '^/upload_reference.*$'
+        - '^/upload_predefined_voice.*$'
+      subject: 'group:admins'
+      policy: 'one_factor'
+
+    # Same endpoints for non-admins — denied.
+    - domain: 'tts.example.com'
+      resources:
+        - '^/import_reference_url.*$'
+        - '^/upload_reference.*$'
+        - '^/upload_predefined_voice.*$'
+      policy: 'deny'
+
+    # Everything else — any authenticated user.
+    - domain: 'tts.example.com'
+      policy: 'one_factor'
+
+session:
+  # 'secret' comes from AUTHELIA_SESSION_SECRET (compose env).
+  cookies:
+    - domain: 'example.com'                     # parent of tts./auth.
+      authelia_url: 'https://auth.example.com'
+      default_redirection_url: 'https://tts.example.com'
+      name: 'authelia_session'
+      expiration: '1 hour'
+      inactivity: '5 minutes'
+  redis:
+    host: 'redis'
+    port: 6379
+
+# Brute-force protection on the login form.
+regulation:
+  max_retries: 4
+  find_time: '2 minutes'
+  ban_time: '5 minutes'
+
+storage:
+  # 'encryption_key' comes from AUTHELIA_STORAGE_ENCRYPTION_KEY (compose env).
+  local:
+    path: '/config/db.sqlite3'
+
+# TOTP enrolment links are written to this file (no SMTP needed to get started).
+# For real e-mail delivery, replace with an 'smtp:' notifier.
+notifier:
+  filesystem:
+    filename: '/config/notification.txt'
