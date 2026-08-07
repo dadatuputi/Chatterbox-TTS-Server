@@ -1,0 +1,2 @@
+# Never commit the real tunnel token / service-token secrets.
+.env

@@ -1,0 +1,61 @@
+# Chatterbox-TTS-Server behind a Cloudflare Tunnel, gated by Cloudflare Access.
+#
+#   cp .env.example .env      # then edit it
+#   docker compose -f docker-compose.cloudflare.yml up -d --build
+#
+# No host ports are published. cloudflared makes an OUTBOUND connection to
+# Cloudflare and forwards the public hostname to the app on the internal network,
+# so the box exposes nothing. Login (for humans) and the API service token (for
+# machines) are enforced by Cloudflare Access at the edge — the app itself runs
+# with no auth (config.yaml: use_auth: false) and trusts the tunnel.
+
+name: chatterbox-cloudflare
+
+networks:
+  tunnelnet:
+    driver: bridge
+
+volumes:
+  hf_cache:
+
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+    networks: [tunnelnet]
+    depends_on: [chatterbox-tts-server]
+
+  chatterbox-tts-server:
+    build:
+      context: ../..
+      dockerfile: ${APP_DOCKERFILE:-Dockerfile}
+      args:
+        RUNTIME: nvidia
+    restart: unless-stopped
+    # No host 'ports:' — reachable only via the tunnel on the internal network.
+    expose:
+      - "8004"
+    volumes:
+      - ../../config.yaml:/app/config.yaml
+      - ../../voices:/app/voices
+      - ../../reference_audio:/app/reference_audio
+      - ../../outputs:/app/outputs
+      - ../../logs:/app/logs
+      - hf_cache:/app/hf_cache
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HF_HUB_ENABLE_HF_TRANSFER=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    networks: [tunnelnet]
+    # --- GPU (NVIDIA). Delete this block when using Dockerfile.cpu. ---
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
