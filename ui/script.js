@@ -94,12 +94,22 @@ document.addEventListener('DOMContentLoaded', async function () {
     const urlImportPanel = document.getElementById('url-import-panel');
     const importSourceInput = document.getElementById('import-source');
     const importSegmentsInput = document.getElementById('import-segments');
+    const importStartInput = document.getElementById('import-start');
+    const importDurationInput = document.getElementById('import-duration');
     const importNameInput = document.getElementById('import-name');
     const importCookiesInput = document.getElementById('import-cookies');
     const importPreviewButton = document.getElementById('import-preview-button');
     const importCommitButton = document.getElementById('import-commit-button');
     const importStatus = document.getElementById('import-status');
     const importPreviewAudio = document.getElementById('import-preview-audio');
+    const importPlayerWrap = document.getElementById('import-player-wrap');
+    const importPlayerTime = document.getElementById('import-player-time');
+    const importSnapButton = document.getElementById('import-snap-button');
+    const importFallbackNote = document.getElementById('import-fallback-note');
+    let ytPlayer = null;            // YT.Player instance
+    let ytApiLoading = null;        // Promise for the IFrame API script
+    let ytCurrentVideoId = null;    // currently embedded video id
+    let ytTimePoll = null;          // setInterval handle for the position readout
     let appCapabilities = {};
     const presetsContainer = document.getElementById('presets-container');
     const presetsPlaceholder = document.getElementById('presets-placeholder');
@@ -1495,6 +1505,18 @@ document.addEventListener('DOMContentLoaded', async function () {
         importStatus.style.color = colors[type] || '';
     }
 
+    function computeSegments() {
+        // Advanced multi-segment field wins when non-empty.
+        const advanced = (importSegmentsInput?.value || '').trim();
+        if (advanced) return advanced;
+        // Otherwise build a single window from start + duration.
+        const start = parseFloat(importStartInput?.value);
+        const duration = parseFloat(importDurationInput?.value);
+        if (!isFinite(start) || start < 0) return '';       // no start -> whole file
+        if (!isFinite(duration) || duration <= 0) return ''; // no duration -> whole file
+        return `${start}-${start + duration}`;
+    }
+
     function buildImportFormData(preview) {
         const source = (importSourceInput?.value || '').trim();
         if (!source) {
@@ -1503,11 +1525,109 @@ document.addEventListener('DOMContentLoaded', async function () {
         }
         const fd = new FormData();
         fd.append('url', source);
-        fd.append('segments', (importSegmentsInput?.value || '').trim());
+        fd.append('segments', computeSegments());
         fd.append('name', (importNameInput?.value || '').trim());
         fd.append('cookies', importCookiesInput?.value || '');
         fd.append('preview', preview ? 'true' : 'false');
         return fd;
+    }
+
+    // --- YouTube embedded player (snap-to-current) ---
+    function parseYouTubeId(url) {
+        if (!url) return null;
+        try {
+            const u = new URL(url.trim());
+            const host = u.hostname.replace(/^www\./, '');
+            if (host === 'youtu.be') return u.pathname.slice(1) || null;
+            if (host === 'youtube.com' || host === 'm.youtube.com' || host === 'music.youtube.com') {
+                if (u.pathname === '/watch') return u.searchParams.get('v');
+                const m = u.pathname.match(/^\/(embed|shorts|live)\/([^/?]+)/);
+                if (m) return m[2];
+            }
+        } catch (e) { /* not a URL */ }
+        return null;
+    }
+
+    function loadYouTubeApi() {
+        if (window.YT && window.YT.Player) return Promise.resolve();
+        if (ytApiLoading) return ytApiLoading;
+        ytApiLoading = new Promise((resolve) => {
+            const prev = window.onYouTubeIframeAPIReady;
+            window.onYouTubeIframeAPIReady = () => { if (typeof prev === 'function') prev(); resolve(); };
+            const tag = document.createElement('script');
+            tag.src = 'https://www.youtube.com/iframe_api';
+            document.head.appendChild(tag);
+        });
+        return ytApiLoading;
+    }
+
+    function fmtTime(s) {
+        s = Math.max(0, Math.floor(s || 0));
+        const m = Math.floor(s / 60);
+        return `${m}:${String(s % 60).padStart(2, '0')}`;
+    }
+
+    function startPlayerPoll() {
+        stopPlayerPoll();
+        ytTimePoll = setInterval(() => {
+            if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function' && importPlayerTime) {
+                importPlayerTime.textContent = fmtTime(ytPlayer.getCurrentTime());
+            }
+        }, 250);
+    }
+    function stopPlayerPoll() { if (ytTimePoll) { clearInterval(ytTimePoll); ytTimePoll = null; } }
+
+    function showFallback() {
+        stopPlayerPoll();
+        if (ytPlayer) { try { ytPlayer.destroy(); } catch (e) { } ytPlayer = null; }
+        ytCurrentVideoId = null;
+        if (importPlayerWrap) importPlayerWrap.classList.add('hidden');
+        // Only nudge the user with the fallback note when they actually typed a URL.
+        const hasUrl = /^https?:\/\//i.test((importSourceInput?.value || '').trim());
+        if (importFallbackNote) importFallbackNote.classList.toggle('hidden', !hasUrl);
+    }
+
+    async function syncPlayerToSource() {
+        const vid = parseYouTubeId(importSourceInput?.value || '');
+        if (!vid) { showFallback(); return; }
+        if (importFallbackNote) importFallbackNote.classList.add('hidden');
+        if (importPlayerWrap) importPlayerWrap.classList.remove('hidden');
+        if (vid === ytCurrentVideoId && ytPlayer) return;
+        ytCurrentVideoId = vid;
+        try {
+            await loadYouTubeApi();
+            if (ytPlayer && typeof ytPlayer.loadVideoById === 'function') {
+                ytPlayer.cueVideoById(vid);
+            } else {
+                ytPlayer = new YT.Player('import-player', {
+                    videoId: vid,
+                    playerVars: { playsinline: 1, modestbranding: 1, rel: 0 },
+                    events: { onReady: startPlayerPoll },
+                });
+            }
+        } catch (e) {
+            console.error('YouTube player failed to load:', e);
+            showFallback();
+        }
+    }
+
+    if (importSourceInput) {
+        let srcDebounce = null;
+        importSourceInput.addEventListener('input', () => {
+            clearTimeout(srcDebounce);
+            srcDebounce = setTimeout(syncPlayerToSource, 400);
+        });
+    }
+    if (importSnapButton) {
+        importSnapButton.addEventListener('click', () => {
+            if (ytPlayer && typeof ytPlayer.getCurrentTime === 'function') {
+                const t = ytPlayer.getCurrentTime();
+                if (importStartInput) importStartInput.value = (Math.round(t * 10) / 10).toFixed(1);
+                setImportStatus(`Start set to ${fmtTime(t)}. Set a duration and Preview.`, 'info');
+            } else {
+                setImportStatus('No player loaded — enter the start time manually.', 'warning');
+            }
+        });
     }
 
     function setImportBusy(busy, activeButton, label) {
