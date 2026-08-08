@@ -98,6 +98,43 @@ def test_trim_audio_noop_when_short(tone_wav):
 
 
 @requires_ffmpeg
+def test_extract_best_clip_picks_longest_speech(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    sr = 24000
+
+    def tone(sec, f=200):
+        return (0.2 * np.sin(2 * np.pi * f * np.arange(int(sr * sec)) / sr)).astype("float32")
+
+    def sil(sec):
+        return np.zeros(int(sr * sec), dtype="float32")
+
+    # 2s silence, 12s speech, 3s silence, 4s speech, 2s silence  (23s total)
+    sig = np.concatenate([sil(2), tone(12), sil(3), tone(4, 260), sil(2)])
+    p = str(tmp_path / "long.wav")
+    sf.write(p, sig, sr)
+
+    dur, segs = vi._probe_speech_segments(p, -30, 0.4)
+    assert len(segs) == 2  # two speech regions detected
+
+    assert vi.extract_best_clip(p, target_sec=18.0) is True
+    # 12s + 4s of speech with the silences removed, capped at target
+    assert 14.0 < sf.info(p).duration <= 18.5
+
+
+@requires_ffmpeg
+def test_extract_best_clip_noop_on_short_clean(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    sr = 24000
+    tone = (0.2 * np.sin(2 * np.pi * 200 * np.arange(sr * 8) / sr)).astype("float32")
+    p = str(tmp_path / "short.wav")
+    sf.write(p, tone, sr)
+    # Already short and contiguous — nothing to select.
+    assert vi.extract_best_clip(p, target_sec=18.0) is False
+
+
+@requires_ffmpeg
 def test_clean_audio_outputs_mono_24k(tmp_path):
     import numpy as np
     import soundfile as sf

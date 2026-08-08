@@ -751,6 +751,7 @@ async def get_predefined_voices_api():
 async def upload_reference_audio_endpoint(
     files: List[UploadFile] = File(...),
     cleanup: bool = Form(False),
+    auto_extract: bool = Form(False),
 ):
     """
     Handles uploading of reference audio files (.wav, .mp3) for voice cloning.
@@ -792,6 +793,13 @@ async def upload_reference_audio_endpoint(
             logger.info(
                 f"Successfully saved uploaded reference file to: {destination_path}"
             )
+
+            # Optional: auto-select the best speech window (WAV only).
+            if auto_extract and destination_path.suffix.lower() == ".wav":
+                try:
+                    voice_import.extract_best_clip(str(destination_path))
+                except Exception as e_ex:
+                    logger.warning(f"Best-clip extraction failed for '{safe_filename}', keeping full: {e_ex}")
 
             # Optional cleanup (denoise / trim silence / normalize). WAV only.
             if cleanup and destination_path.suffix.lower() == ".wav":
@@ -857,6 +865,7 @@ async def import_reference_url_endpoint(
     preview: bool = Form(False, description="If true, return the audio without saving it."),
     cookies: str = Form("", description="Optional cookies.txt contents for age-gated/members-only sources."),
     cleanup: bool = Form(False, description="Denoise, trim edge silence, and loudness-normalize the clip."),
+    auto_extract: bool = Form(False, description="Auto-select the best contiguous speech window from a longer source."),
 ):
     """Feature A: import reference audio from a URL or local file, selecting time windows.
 
@@ -937,6 +946,13 @@ async def import_reference_url_endpoint(
 
         if not os.path.exists(tmp_out):
             raise HTTPException(status_code=422, detail="Import produced no audio.")
+
+        # Optional: auto-select the best speech window from a longer source (Tier 1).
+        if auto_extract:
+            try:
+                await loop.run_in_executor(None, lambda: voice_import.extract_best_clip(tmp_out))
+            except voice_import.ImportError_ as e:
+                logger.warning(f"Best-clip extraction failed, using full clip: {e}")
 
         # Optional cleanup (denoise / trim silence / normalize) before preview or save.
         if cleanup:

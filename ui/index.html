@@ -264,6 +264,10 @@
                                             <input type="checkbox" id="clone-upload-cleanup" class="form-checkbox">
                                             <span>Clean up audio (denoise, trim silence, normalize)</span>
                                         </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="clone-upload-autoextract" class="form-checkbox">
+                                            <span>Auto-extract best clip (from a longer file)</span>
+                                        </label>
                                     </div>
 
                                     <!-- Method 2: import a clip from a URL / YouTube -->
@@ -354,6 +358,10 @@
                                         <label class="checkbox-label" style="margin-top: 0.5rem;">
                                             <input type="checkbox" id="import-cleanup" class="form-checkbox">
                                             <span>Clean up audio (denoise, trim silence, normalize) &mdash; turn off to keep wanted ambience</span>
+                                        </label>
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="import-autoextract" class="form-checkbox">
+                                            <span>Auto-extract best clip (pick the longest clean speech from a longer source)</span>
                                         </label>
                                         <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
                                             <button type="button" id="import-preview-button" class="btn secondary">Preview</button>

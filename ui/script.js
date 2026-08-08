@@ -1455,7 +1455,10 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (firstUploaded && cloneReferenceSelect && Array.from(cloneReferenceSelect.options).some(opt => opt.value === firstUploaded)) {
                 cloneReferenceSelect.value = firstUploaded;
             }
-        }, cloneImportButton, { cleanup: document.getElementById('clone-upload-cleanup')?.checked ? 'true' : 'false' }));
+        }, cloneImportButton, {
+            cleanup: document.getElementById('clone-upload-cleanup')?.checked ? 'true' : 'false',
+            auto_extract: document.getElementById('clone-upload-autoextract')?.checked ? 'true' : 'false',
+        }));
     }
 
     if (predefinedVoiceImportButton && predefinedVoiceFileInput) {
@@ -1602,6 +1605,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         fd.append('cookies', importCookiesInput?.value || '');
         fd.append('preview', preview ? 'true' : 'false');
         fd.append('cleanup', document.getElementById('import-cleanup')?.checked ? 'true' : 'false');
+        fd.append('auto_extract', document.getElementById('import-autoextract')?.checked ? 'true' : 'false');
         return fd;
     }
 

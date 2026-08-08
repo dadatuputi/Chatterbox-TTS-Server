@@ -14,6 +14,7 @@
 
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -235,6 +236,98 @@ def clean_audio(path: str) -> bool:
         raise ImportError_("cleanup failed:\n" + r.stderr[-1000:])
     os.replace(tmp, path)
     return True
+
+
+def _probe_speech_segments(path: str, noise_db: int, min_silence: float):
+    """Return (duration, [ (speech_start, speech_end), ... ]) using ffmpeg silencedetect."""
+    r = _run(["ffmpeg", "-hide_banner", "-nostats", "-i", path,
+              "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}", "-f", "null", "-"])
+    err = r.stderr or ""
+    dur = None
+    m = re.search(r"Duration:\s*(\d+):(\d+):(\d+\.?\d*)", err)
+    if m:
+        dur = int(m.group(1)) * 3600 + int(m.group(2)) * 60 + float(m.group(3))
+    starts = [float(x) for x in re.findall(r"silence_start:\s*(-?\d+\.?\d*)", err)]
+    ends = [float(x) for x in re.findall(r"silence_end:\s*(-?\d+\.?\d*)", err)]
+    if dur is None:
+        # Fall back to the last known timestamp if Duration wasn't printed.
+        dur = max([*starts, *ends, 0.0]) or 0.0
+
+    silences = []
+    for k in range(len(starts)):
+        s = max(0.0, starts[k])
+        e = ends[k] if k < len(ends) else dur
+        silences.append((s, min(e, dur)))
+
+    speech = []
+    cur = 0.0
+    for s, e in sorted(silences):
+        if s > cur:
+            speech.append((cur, s))
+        cur = max(cur, e)
+    if dur and cur < dur:
+        speech.append((cur, dur))
+    # Drop sub-0.3s slivers.
+    speech = [(s, e) for (s, e) in speech if (e - s) >= 0.3]
+    return dur, speech
+
+
+def extract_best_clip(path: str, target_sec: float = 18.0,
+                      noise_db: int = -30, min_silence: float = 0.4) -> bool:
+    """Extract the "best" reference window from a longer source, in place.
+
+    Heuristic (Tier 1): find speech regions via silence detection, take the longest
+    contiguous run, and expand into neighboring speech (dropping the silences between)
+    until ~target_sec, capping there. This turns a talk-with-pauses into a tight clip
+    of the most sustained speech, without any content/speaker understanding.
+    Returns True if a clip was extracted; False if the source had no usable speech.
+    """
+    if not has_ffmpeg():
+        return False
+    dur, speech = _probe_speech_segments(path, noise_db, min_silence)
+    if not speech:
+        return False
+    # If the whole thing is already short, nothing to select.
+    if dur and dur <= target_sec + 1.0 and len(speech) <= 1:
+        return False
+
+    longest = max(speech, key=lambda se: se[1] - se[0])
+    idx = speech.index(longest)
+    chosen = [longest]
+    total = longest[1] - longest[0]
+    lo = hi = idx
+    # Grow outward from the longest region, always absorbing the larger neighbor.
+    while total < target_sec and (lo > 0 or hi < len(speech) - 1):
+        prev_seg = speech[lo - 1] if lo > 0 else None
+        next_seg = speech[hi + 1] if hi < len(speech) - 1 else None
+        prev_len = (prev_seg[1] - prev_seg[0]) if prev_seg else -1
+        next_len = (next_seg[1] - next_seg[0]) if next_seg else -1
+        if next_len >= prev_len and next_seg is not None:
+            chosen.append(next_seg); total += next_len; hi += 1
+        elif prev_seg is not None:
+            chosen.insert(0, prev_seg); total += prev_len; lo -= 1
+        else:
+            break
+
+    chosen.sort(key=lambda se: se[0])  # chronological
+    work = make_work_dir()
+    try:
+        parts = []
+        for i, (s, e) in enumerate(chosen):
+            out_p = os.path.join(work, f"_best{i}.wav")
+            r = _run(["ffmpeg", "-y", "-loglevel", "error", "-ss", str(s), "-to", str(e),
+                      "-i", path, out_p])
+            if r.returncode or not os.path.exists(out_p):
+                raise ImportError_("best-clip cut failed:\n" + r.stderr[-1000:])
+            parts.append(out_p)
+        joined = os.path.join(work, "_best.wav")
+        _join(parts, joined, work)
+        # Cap to target (the accumulation can slightly overshoot).
+        trim_audio(joined, target_sec)
+        os.replace(joined, path)
+        return True
+    finally:
+        cleanup_work_dir(work)
 
 
 def make_work_dir(base_tmp: Optional[str] = None) -> str:
