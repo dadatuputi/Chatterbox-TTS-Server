@@ -1490,6 +1490,49 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
+    // --- Custom Voices: download / delete the selected reference ---
+    const cloneDownloadButton = document.getElementById('clone-download-button');
+    const cloneDeleteButton = document.getElementById('clone-delete-button');
+
+    function selectedReferenceName() {
+        const v = cloneReferenceSelect ? cloneReferenceSelect.value : '';
+        return (!v || v === 'none') ? '' : v;
+    }
+
+    if (cloneDownloadButton) {
+        cloneDownloadButton.addEventListener('click', () => {
+            const name = selectedReferenceName();
+            if (!name) { showNotification('Select a custom voice to download.', 'warning'); return; }
+            // Let the browser handle the file download (audio + any cached .pt files).
+            window.location.href = `${API_BASE_URL}/download_voice?name=${encodeURIComponent(name)}`;
+        });
+    }
+
+    if (cloneDeleteButton) {
+        cloneDeleteButton.addEventListener('click', async () => {
+            const name = selectedReferenceName();
+            if (!name) { showNotification('Select a custom voice to delete.', 'warning'); return; }
+            if (!window.confirm(`Delete "${name}" and its cached voice data? This cannot be undone.`)) return;
+            cloneDeleteButton.disabled = true;
+            try {
+                const fd = new FormData();
+                fd.append('name', name);
+                const response = await fetch(`${API_BASE_URL}/delete_reference`, { method: 'POST', body: fd });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || `Delete failed (status ${response.status})`);
+                initialReferenceFiles = result.all_reference_files || [];
+                populateReferenceFiles();
+                showNotification(result.message || 'Voice deleted.', 'success');
+                debouncedSaveState();
+            } catch (e) {
+                console.error('Delete voice error:', e);
+                showNotification(`Delete failed: ${e.message}`, 'error');
+            } finally {
+                cloneDeleteButton.disabled = false;
+            }
+        });
+    }
+
     // --- Feature A: URL / local-file reference import ---
     function applyCapabilities() {
         const importAvailable = appCapabilities?.import?.available;

@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import time
 import uuid
+import zipfile
 import yaml  # For loading presets
 import numpy as np
 import librosa  # For potential direct use if needed, though utils.py handles most
@@ -986,6 +987,73 @@ async def record_reference_endpoint(
     finally:
         await audio.close()
         voice_import.cleanup_work_dir(work_dir)
+
+
+def _resolve_reference_audio(ref_dir: Path, name: str) -> Optional[Path]:
+    """Resolve a reference by name (with or without extension) to an existing file."""
+    candidates = [name.strip()] if Path(name).suffix else []
+    stem = Path(name.strip()).stem
+    candidates += [f"{stem}.wav", f"{stem}.mp3"]
+    for cand in candidates:
+        try:
+            p = utils.safe_resolve_within(ref_dir, cand)
+        except ValueError:
+            continue
+        if p.exists():
+            return p
+    return None
+
+
+@app.post("/delete_reference", tags=["File Management"])
+async def delete_reference_endpoint(request: Request, name: str = Form(...)):
+    """Delete a Custom Voice: its reference audio and any cached .pt conditionals."""
+    auth_cfg = get_auth_config()
+    if auth_cfg.get("enabled") and not getattr(request.state, "is_admin", False):
+        raise HTTPException(status_code=403, detail="Deleting voices is restricted to the admin user.")
+
+    ref_dir = get_reference_audio_path(ensure_absolute=True)
+    target = _resolve_reference_audio(ref_dir, name)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Reference '{name}' not found.")
+
+    target.unlink(missing_ok=True)
+    removed_conds = 0
+    conds_dir = ref_dir / ".conds"
+    if conds_dir.is_dir():
+        for pt in conds_dir.glob(f"{target.stem}.*.pt"):
+            try:
+                pt.unlink()
+                removed_conds += 1
+            except OSError:
+                pass
+    logger.info(f"Deleted reference '{target.name}' and {removed_conds} cached conditionals.")
+    return JSONResponse(
+        content={
+            "message": f"Deleted '{target.name}'.",
+            "removed_conditionals": removed_conds,
+            "all_reference_files": utils.get_valid_reference_files(),
+        }
+    )
+
+
+@app.get("/download_voice", tags=["File Management"])
+async def download_voice_endpoint(name: str):
+    """Download a Custom Voice as a zip: the reference audio plus every cached .pt."""
+    ref_dir = get_reference_audio_path(ensure_absolute=True)
+    target = _resolve_reference_audio(ref_dir, name)
+    if target is None:
+        raise HTTPException(status_code=404, detail=f"Voice '{name}' not found.")
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(target, arcname=target.name)
+        conds_dir = ref_dir / ".conds"
+        if conds_dir.is_dir():
+            for pt in sorted(conds_dir.glob(f"{target.stem}.*.pt")):
+                zf.write(pt, arcname=f".conds/{pt.name}")
+    buf.seek(0)
+    headers = {"Content-Disposition": f'attachment; filename="{target.stem}.zip"'}
+    return StreamingResponse(buf, media_type="application/zip", headers=headers)
 
 
 @app.post("/upload_predefined_voice", tags=["File Management"])

@@ -23,6 +23,7 @@ tts_engine:
   predefined_voices_path: voices
   reference_audio_path: reference_audio
   default_voice_id: Emily.wav
+  persist_conditionals: true
 paths:
   model_cache: model_cache
   output: outputs

@@ -65,6 +65,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
             DEFAULT_REFERENCE_AUDIO_PATH
         ),  # Directory for reference audio files for cloning.
         "default_voice_id": "default_sample.wav",  # Default voice file to use if none is specified.
+        "persist_conditionals": True,  # Cache model-tagged .pt conditionals beside each voice (Custom Voices).
     },
     "paths": {  # General configurable paths for the application.
         "model_cache": str(
