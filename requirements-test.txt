@@ -4,7 +4,9 @@
 # (tests/api) drive the real FastAPI app and stub the heavy ML deps when absent.
 pytest>=7.4.0
 httpx>=0.24.0          # starlette TestClient
-fastapi>=0.100.0       # only needed if not already installed by the app
+fastapi>=0.100.0,<0.116.0   # match the app's pin (starlette<1.0 for TemplateResponse)
 python-multipart>=0.0.5
 aiofiles>=23.0.0
 pydub>=0.25.0
+uvicorn>=0.27.0        # tests/ui serves the app for Playwright
+playwright>=1.40.0     # tests/ui browser automation (browser binary provided by image)
