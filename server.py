@@ -191,7 +191,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=get_ui_title(),
     description="Text-to-Speech server with advanced UI and API capabilities.",
-    version="2.1.0",  # Adds Feature A (URL reference import) and Feature B (HTTP auth)
+    version="2.2.0",  # Feature A (URL/mic import + player), Feature B (auth), Custom Voices, .pt cache
     lifespan=lifespan,
 )
 
