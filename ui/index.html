@@ -198,31 +198,17 @@
                             </div>
 
                             <div id="clone-options" class="form-group hidden">
-                                <label for="clone-reference-select" class="form-label">Reference Audio File</label>
+                                <label for="clone-reference-select" class="form-label">Your custom voices</label>
                                 <p class="form-hint mb-2">
-                                    Select an uploaded <code class="code">.wav</code> or <code class="code">.mp3</code>
-                                    file. For best results, use clean audio recordings.
+                                    Select a saved voice, or add a new one below — there are three ways to create one.
                                 </p>
                                 <div class="flex-row items-center gap-2">
                                     <select id="clone-reference-select" name="clone_reference_select"
                                         class="form-select" style="flex-grow: 1;">
-                                        <option value="none">-- Select Reference File --</option>
+                                        <option value="none">-- Select a custom voice --</option>
                                     </select>
-                                    <input type="file" id="clone-file-input" class="hidden" multiple accept=".wav,.mp3"
-                                        aria-label="Upload reference audio file">
-                                    <button type="button" id="clone-import-button" class="btn-icon-stack"
-                                        title="Import new reference files">
-                                        <svg class="btn-icon-stack__icon" xmlns="http://www.w3.org/2000/svg"
-                                            viewBox="0 0 20 20" fill="currentColor">
-                                            <path
-                                                d="M9.25 13.25a.75.75 0 0 0 1.5 0V4.636l2.955 3.129a.75.75 0 0 0 1.09-1.03l-4.25-4.5a.75.75 0 0 0-1.09 0l-4.25 4.5a.75.75 0 1 0 1.09 1.03L9.25 4.636v8.614Z" />
-                                            <path
-                                                d="M3.5 12.75a.75.75 0 0 0-1.5 0v2.5A2.75 2.75 0 0 0 4.75 18h10.5A2.75 2.75 0 0 0 18 15.25v-2.5a.75.75 0 0 0-1.5 0v2.5c0 .69-.56 1.25-1.25 1.25H4.75c-.69 0-1.25-.56-1.25-1.25v-2.5Z" />
-                                        </svg>
-                                        Import
-                                    </button>
                                     <button type="button" id="clone-refresh-button" class="btn-icon-stack"
-                                        title="Refresh reference file list">
+                                        title="Refresh voice list">
                                         <svg class="btn-icon-stack__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
                                             viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -242,17 +228,42 @@
                                     </button>
                                 </div>
 
-                                <!-- Feature A: import a reference clip from a URL or local file -->
-                                <details id="url-import-panel" class="collapsible hidden" style="margin-top: 0.75rem;">
-                                    <summary class="collapsible__trigger">
-                                        <span>Import from URL / file (create a new reference)</span>
-                                        <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd"
-                                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                                clip-rule="evenodd" />
-                                        </svg>
-                                    </summary>
-                                    <div class="collapsible__content">
+                                <!-- Add a new custom voice: three distinct methods -->
+                                <div class="voice-add">
+                                    <p class="voice-add__title">Add a new custom voice</p>
+                                    <div class="voice-tabs" role="tablist">
+                                        <button type="button" class="voice-tab active" data-voice-tab="upload"
+                                            id="voice-tab-upload" role="tab" aria-selected="true">
+                                            <span class="voice-tab__icon" aria-hidden="true">&#8593;&#65039;</span>
+                                            <span class="voice-tab__label">Upload file</span>
+                                        </button>
+                                        <button type="button" class="voice-tab" data-voice-tab="url"
+                                            id="voice-tab-url" role="tab" aria-selected="false">
+                                            <span class="voice-tab__icon" aria-hidden="true">&#128279;</span>
+                                            <span class="voice-tab__label">URL / YouTube</span>
+                                        </button>
+                                        <button type="button" class="voice-tab" data-voice-tab="record"
+                                            id="voice-tab-record" role="tab" aria-selected="false">
+                                            <span class="voice-tab__icon" aria-hidden="true">&#127908;&#65039;</span>
+                                            <span class="voice-tab__label">Record</span>
+                                        </button>
+                                    </div>
+
+                                    <!-- Method 1: upload an existing audio file -->
+                                    <div class="voice-tab-panel" data-voice-panel="upload">
+                                        <p class="form-hint mb-2">
+                                            Upload a clean <code class="code">.wav</code> or <code class="code">.mp3</code>
+                                            file you already have.
+                                        </p>
+                                        <input type="file" id="clone-file-input" class="hidden" multiple accept=".wav,.mp3"
+                                            aria-label="Upload reference audio file">
+                                        <button type="button" id="clone-import-button" class="btn secondary">
+                                            Choose files&hellip;
+                                        </button>
+                                    </div>
+
+                                    <!-- Method 2: import a clip from a URL / YouTube -->
+                                    <div id="url-import-panel" class="voice-tab-panel hidden" data-voice-panel="url">
                                         <p class="form-hint mb-2">
                                             Pull a short clip from a YouTube (or any
                                             <code class="code">yt-dlp</code>-supported) URL, or a local file path on
@@ -264,10 +275,9 @@
                                         <div class="form-group">
                                             <label for="import-source" class="form-label small">Source URL or local path</label>
                                             <input type="text" id="import-source" class="form-input small"
-                                                placeholder="https://www.youtube.com/watch?v=…  or  /path/to/audio.mp3">
+                                                placeholder="https://www.youtube.com/watch?v=&hellip;  or  /path/to/audio.mp3">
                                         </div>
 
-                                        <!-- Embedded YouTube player (shown for embeddable YouTube URLs) -->
                                         <div id="import-player-wrap" class="form-group hidden">
                                             <div id="import-player" class="import-player"></div>
                                             <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
@@ -279,7 +289,6 @@
                                             </div>
                                         </div>
 
-                                        <!-- Fallback for non-YouTube / non-embeddable sources -->
                                         <p id="import-fallback-note" class="form-hint hidden" style="margin-top: 0.25rem;">
                                             No in-page player for this source. Open it in the YouTube app/site, note the
                                             time you want, and type the <strong>start</strong> below.
@@ -318,7 +327,7 @@
                                             <div class="collapsible__content">
                                                 <label for="import-segments" class="form-label small">Segments (overrides start/duration when set)</label>
                                                 <input type="text" id="import-segments" class="form-input small"
-                                                    placeholder='"1:20-1:50, 4:05-4:35"  — joined in order, first sets prosody'>
+                                                    placeholder='"1:20-1:50, 4:05-4:35"  &mdash; joined in order, first sets prosody'>
                                                 <p class="form-hint">Formats: <code class="code">SS</code>,
                                                     <code class="code">MM:SS</code>, <code class="code">HH:MM:SS</code>.
                                                     Leave blank to use the start/duration above.</p>
@@ -326,7 +335,7 @@
                                         </details>
                                         <details class="collapsible">
                                             <summary class="collapsible__trigger">
-                                                <span>Cookies (optional — age-gated / members-only)</span>
+                                                <span>Cookies (optional &mdash; age-gated / members-only)</span>
                                                 <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
                                                     <path fill-rule="evenodd"
                                                         d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
@@ -335,7 +344,7 @@
                                             </summary>
                                             <div class="collapsible__content">
                                                 <textarea id="import-cookies" class="form-input small" rows="3"
-                                                    placeholder="Paste cookies.txt contents here — only needed for restricted sources."></textarea>
+                                                    placeholder="Paste cookies.txt contents here &mdash; only needed for restricted sources."></textarea>
                                             </div>
                                         </details>
                                         <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
@@ -350,21 +359,11 @@
                                             use. All output is Perth-watermarked and detectable as synthetic.
                                         </p>
                                     </div>
-                                </details>
 
-                                <!-- Record a reference from the microphone -->
-                                <details id="mic-record-panel" class="collapsible" style="margin-top: 0.75rem;">
-                                    <summary class="collapsible__trigger">
-                                        <span>Record from microphone (create a new reference)</span>
-                                        <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd"
-                                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
-                                                clip-rule="evenodd" />
-                                        </svg>
-                                    </summary>
-                                    <div class="collapsible__content">
+                                    <!-- Method 3: record from the microphone -->
+                                    <div id="mic-record-panel" class="voice-tab-panel hidden" data-voice-panel="record">
                                         <p class="form-hint mb-2">
-                                            Record ~10–20&nbsp;s of clean speech to clone a voice (yours or someone
+                                            Record ~10&ndash;20&nbsp;s of clean speech to clone a voice (yours or someone
                                             who has consented). Reading the passage below at a natural pace works well.
                                         </p>
                                         <details class="collapsible">
@@ -388,7 +387,7 @@
                                             </div>
                                         </details>
                                         <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
-                                            <button type="button" id="mic-record-button" class="btn primary">● Record</button>
+                                            <button type="button" id="mic-record-button" class="btn primary">&#9679; Record</button>
                                             <span class="form-hint">Status:
                                                 <span id="mic-record-timer" class="tabular-nums">idle</span></span>
                                         </div>
@@ -402,7 +401,7 @@
                                         <button type="button" id="mic-save-button" class="btn secondary" disabled>Save recording</button>
                                         <p id="mic-record-status" class="form-hint" style="margin-top: 0.5rem;"></p>
                                     </div>
-                                </details>
+                                </div>
                             </div>
 
                             <div class="form-group">

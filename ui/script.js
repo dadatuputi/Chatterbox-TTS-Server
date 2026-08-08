@@ -1533,11 +1533,32 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
+    // --- Custom Voices: three-method tabs (upload / url / record) ---
+    const voiceTabButtons = Array.from(document.querySelectorAll('.voice-tab'));
+    const voiceTabPanels = Array.from(document.querySelectorAll('.voice-tab-panel'));
+
+    function activateVoiceTab(tab) {
+        voiceTabButtons.forEach(b => {
+            const on = b.dataset.voiceTab === tab;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', on ? 'true' : 'false');
+        });
+        voiceTabPanels.forEach(p => p.classList.toggle('hidden', p.dataset.voicePanel !== tab));
+    }
+    voiceTabButtons.forEach(b => {
+        b.addEventListener('click', () => activateVoiceTab(b.dataset.voiceTab));
+    });
+
     // --- Feature A: URL / local-file reference import ---
     function applyCapabilities() {
         const importAvailable = appCapabilities?.import?.available;
-        if (urlImportPanel) {
-            urlImportPanel.classList.toggle('hidden', !importAvailable);
+        const urlTab = document.getElementById('voice-tab-url');
+        if (urlTab) {
+            urlTab.classList.toggle('hidden', !importAvailable);
+            // If URL import isn't available and its tab was active, fall back to Upload.
+            if (!importAvailable && urlTab.classList.contains('active')) {
+                activateVoiceTab('upload');
+            }
         }
     }
 
@@ -1772,19 +1793,51 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     function stopMicTick() { if (micTick) { clearInterval(micTick); micTick = null; } }
 
+    function pickRecorderMime() {
+        // Choose a container the current browser can actually record. Chrome ->
+        // webm/opus, Firefox -> ogg/opus, Safari -> mp4. Return '' to let the
+        // browser pick its own default if none of these report supported.
+        const candidates = [
+            'audio/webm;codecs=opus', 'audio/webm',
+            'audio/ogg;codecs=opus', 'audio/ogg',
+            'audio/mp4',
+        ];
+        if (window.MediaRecorder && typeof MediaRecorder.isTypeSupported === 'function') {
+            for (const t of candidates) {
+                if (MediaRecorder.isTypeSupported(t)) return t;
+            }
+        }
+        return '';
+    }
+
     async function startRecording() {
-        if (!navigator.mediaDevices || !window.MediaRecorder) {
-            setMicStatus('This browser does not support in-page recording (needs HTTPS + MediaRecorder).', 'error');
+        // Accurate diagnostics: the usual reason getUserMedia is missing is an
+        // insecure (non-HTTPS) context, not an unsupported browser. Firefox, Chrome
+        // and Safari all support recording over HTTPS.
+        if (!window.isSecureContext) {
+            setMicStatus('Recording needs a secure (HTTPS) connection. Open the app via its https:// address.', 'error');
+            return;
+        }
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setMicStatus('This browser blocks microphone access in this context.', 'error');
+            return;
+        }
+        if (!window.MediaRecorder) {
+            setMicStatus('This browser lacks MediaRecorder; try a current Firefox, Chrome, or Safari.', 'error');
             return;
         }
         try {
             micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         } catch (e) {
-            setMicStatus('Microphone permission denied or unavailable.', 'error');
+            const reason = (e && e.name === 'NotAllowedError')
+                ? 'Microphone permission was denied.'
+                : 'Microphone unavailable: ' + ((e && e.message) || 'unknown error');
+            setMicStatus(reason, 'error');
             return;
         }
         micChunks = [];
-        micRecorder = new MediaRecorder(micStream);
+        const mime = pickRecorderMime();
+        micRecorder = mime ? new MediaRecorder(micStream, { mimeType: mime }) : new MediaRecorder(micStream);
         micRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) micChunks.push(ev.data); };
         micRecorder.onstop = () => {
             micBlob = new Blob(micChunks, { type: micRecorder.mimeType || 'audio/webm' });
