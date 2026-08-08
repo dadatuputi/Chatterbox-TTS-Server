@@ -7,4 +7,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 python -m pip install -q -r requirements-test.txt
-exec python -m pytest tests/ -v
+
+# Unit tests (helpers, data model, ffmpeg ops, auth).
+python -m pytest tests --ignore=tests/api -v
+
+# API integration tests run in a separate process: they stub heavy ML deps when
+# absent, which must not leak into the unit run.
+python -m pytest tests/api -v

@@ -69,6 +69,7 @@ from config import (
 
 import auth  # HTTP Basic / bearer-token middleware (Feature B)
 import voice_import  # URL / local reference import (Feature A)
+import voices_store  # Per-user voice ownership/visibility on the filesystem
 import engine  # TTS Engine interface
 from models import (  # Pydantic models
     CustomTTSRequest,
@@ -473,7 +474,9 @@ async def get_ui_initial_data(request: Request):
         if not admin:
             # Friends never receive server secrets in the config payload.
             full_config = _redact_config_for_non_admin(full_config)
-        reference_files = utils.get_valid_reference_files()
+        ref_dir = get_reference_audio_path(ensure_absolute=True)
+        voices_list = voices_store.list_voices(ref_dir, current_user(request), admin)
+        reference_files = [v["filename"] for v in voices_list]
         predefined_voices = utils.get_predefined_voices()
 
         # Get model information for UI
@@ -513,10 +516,12 @@ async def get_ui_initial_data(request: Request):
             "initial_gen_result": initial_gen_result_placeholder,
             "model_info": model_info,  # NEW: Include model information
             # Feature A/B capability flags for the UI to enable/hide panels.
+            "voices": voices_list,
             "capabilities": {
                 "import": voice_import.import_capabilities(),
                 "auth_enabled": bool(auth_cfg.get("enabled")),
                 "is_admin": admin,
+                "user_email": current_user(request),
             },
         }
     except Exception as e:
@@ -529,6 +534,12 @@ async def get_ui_initial_data(request: Request):
 # --- Admin identity helpers ---
 # Sensitive config keys never sent to a non-admin browser.
 _SENSITIVE_SERVER_KEYS = ("auth_password", "auth_password_hash", "api_token", "admin_emails")
+
+
+def current_user(request: Request) -> str:
+    """The requesting user's key: the Cloudflare Access email, or 'local' if none."""
+    email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+    return email or "local"
 
 
 def is_admin_request(request: Request) -> bool:
@@ -719,16 +730,29 @@ async def unload_model_endpoint(request: Request):
 
 # --- UI Helper API Endpoints ---
 @app.get("/get_reference_files", response_model=List[str], tags=["UI Helpers"])
-async def get_reference_files_api():
-    """Returns a list of valid reference audio filenames (.wav, .mp3)."""
+async def get_reference_files_api(request: Request):
+    """Returns reference audio filenames visible to the current user (admin: all)."""
     logger.debug("Request for /get_reference_files.")
     try:
-        return utils.get_valid_reference_files()
+        ref_dir = get_reference_audio_path(ensure_absolute=True)
+        voices = voices_store.list_voices(ref_dir, current_user(request), is_admin_request(request))
+        return [v["filename"] for v in voices]
     except Exception as e:
         logger.error(f"Error getting reference files for API: {e}", exc_info=True)
         raise HTTPException(
             status_code=500, detail="Failed to retrieve reference audio files."
         )
+
+
+@app.get("/api/voices", tags=["UI Helpers"])
+async def get_voices_api(request: Request):
+    """Rich Custom Voices list (filename, owner, visibility, created) scoped to the user."""
+    try:
+        ref_dir = get_reference_audio_path(ensure_absolute=True)
+        return voices_store.list_voices(ref_dir, current_user(request), is_admin_request(request))
+    except Exception as e:
+        logger.error(f"Error listing voices: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to list voices.")
 
 
 @app.get(
@@ -749,9 +773,11 @@ async def get_predefined_voices_api():
 # --- File Upload Endpoints ---
 @app.post("/upload_reference", tags=["File Management"])
 async def upload_reference_audio_endpoint(
+    request: Request,
     files: List[UploadFile] = File(...),
     cleanup: bool = Form(False),
     auto_extract: bool = Form(False),
+    visibility: str = Form("private"),
 ):
     """
     Handles uploading of reference audio files (.wav, .mp3) for voice cloning.
@@ -759,6 +785,8 @@ async def upload_reference_audio_endpoint(
     """
     logger.info(f"Request to /upload_reference with {len(files)} file(s).")
     ref_path = get_reference_audio_path(ensure_absolute=True)
+    vis = "shared" if visibility == "shared" else "private"
+    dest_dir = voices_store.target_dir(ref_path, current_user(request), vis)
     uploaded_filenames_successfully: List[str] = []
     upload_errors: List[Dict[str, str]] = []
 
@@ -771,7 +799,7 @@ async def upload_reference_audio_endpoint(
             continue
 
         safe_filename = utils.sanitize_filename(file.filename)
-        destination_path = ref_path / safe_filename
+        destination_path = dest_dir / safe_filename
 
         try:
             if not (
@@ -839,7 +867,8 @@ async def upload_reference_audio_endpoint(
         finally:
             await file.close()
 
-    all_current_reference_files = utils.get_valid_reference_files()
+    all_current_reference_files = [v["filename"] for v in voices_store.list_voices(
+        ref_path, current_user(request), is_admin_request(request))]
     response_data = {
         "message": f"Processed {len(files)} file(s).",
         "uploaded_files": uploaded_filenames_successfully,
@@ -866,6 +895,7 @@ async def import_reference_url_endpoint(
     cookies: str = Form("", description="Optional cookies.txt contents for age-gated/members-only sources."),
     cleanup: bool = Form(False, description="Denoise, trim edge silence, and loudness-normalize the clip."),
     auto_extract: bool = Form(False, description="Auto-select the best contiguous speech window from a longer source."),
+    visibility: str = Form("private", description="'private' (only you) or 'shared' (all users)."),
 ):
     """Feature A: import reference audio from a URL or local file, selecting time windows.
 
@@ -919,10 +949,11 @@ async def import_reference_url_endpoint(
                 status_code=400, detail="A destination name is required to save the reference."
             )
         stem = Path(name.strip()).stem  # drop any extension / path the user typed
-        try:
-            dest_path = utils.safe_resolve_within(ref_dir, f"{stem}.wav")
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+        if not stem:
+            raise HTTPException(status_code=400, detail="Invalid destination name.")
+        vis = "shared" if visibility == "shared" else "private"
+        dest_dir = voices_store.target_dir(ref_dir, current_user(request), vis)
+        dest_path = dest_dir / f"{stem}.wav"
 
     work_dir = voice_import.make_work_dir()
     tmp_out = os.path.join(work_dir, "_reference.wav")
@@ -1002,7 +1033,8 @@ async def import_reference_url_endpoint(
                 "filename": dest_path.name,
                 "duration": round(duration, 2),
                 "warning": warning,
-                "all_reference_files": utils.get_valid_reference_files(),
+                "all_reference_files": [v["filename"] for v in voices_store.list_voices(
+                    ref_dir, current_user(request), is_admin_request(request))],
             },
             status_code=200,
         )
@@ -1012,9 +1044,11 @@ async def import_reference_url_endpoint(
 
 @app.post("/record_reference", tags=["File Management"])
 async def record_reference_endpoint(
+    request: Request,
     audio: UploadFile = File(..., description="Recorded audio blob (webm/ogg/mp4/wav)."),
     name: str = Form(..., description="Destination filename stem."),
     cleanup: bool = Form(False, description="Denoise, trim edge silence, and loudness-normalize the recording."),
+    visibility: str = Form("private", description="'private' (only you) or 'shared' (all users)."),
 ):
     """Save a microphone recording as a reference-audio WAV.
 
@@ -1031,10 +1065,10 @@ async def record_reference_endpoint(
 
     ref_dir = get_reference_audio_path(ensure_absolute=True)
     stem = Path(name.strip()).stem
-    try:
-        dest_path = utils.safe_resolve_within(ref_dir, f"{stem}.wav")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if not stem:
+        raise HTTPException(status_code=400, detail="Invalid destination name.")
+    vis = "shared" if visibility == "shared" else "private"
+    dest_path = voices_store.target_dir(ref_dir, current_user(request), vis) / f"{stem}.wav"
 
     work_dir = voice_import.make_work_dir()
     # Keep the uploaded extension so ffmpeg can sniff the container.
@@ -1090,7 +1124,8 @@ async def record_reference_endpoint(
                 "filename": dest_path.name,
                 "duration": round(duration, 2),
                 "warning": warning,
-                "all_reference_files": utils.get_valid_reference_files(),
+                "all_reference_files": [v["filename"] for v in voices_store.list_voices(
+                    ref_dir, current_user(request), is_admin_request(request))],
             },
             status_code=200,
         )
@@ -1136,51 +1171,51 @@ def _resolve_reference_audio(ref_dir: Path, name: str) -> Optional[Path]:
 
 @app.post("/delete_reference", tags=["File Management"])
 async def delete_reference_endpoint(request: Request, name: str = Form(...)):
-    """Delete a Custom Voice: its reference audio and any cached .pt conditionals."""
-    auth_cfg = get_auth_config()
-    if auth_cfg.get("enabled") and not getattr(request.state, "is_admin", False):
-        raise HTTPException(status_code=403, detail="Deleting voices is restricted to the admin user.")
+    """Delete a Custom Voice + its cached .pt conditionals.
 
+    A user may delete their own private voices; deleting shared/legacy voices (or
+    anyone else's) requires admin.
+    """
+    user = current_user(request)
+    admin = is_admin_request(request)
     ref_dir = get_reference_audio_path(ensure_absolute=True)
-    target = _resolve_reference_audio(ref_dir, name)
+    target = voices_store.resolve(ref_dir, name, user, admin)
     if target is None:
         raise HTTPException(status_code=404, detail=f"Reference '{name}' not found.")
 
-    target.unlink(missing_ok=True)
-    removed_conds = 0
-    conds_dir = ref_dir / ".conds"
-    if conds_dir.is_dir():
-        for pt in conds_dir.glob(f"{target.stem}.*.pt"):
-            try:
-                pt.unlink()
-                removed_conds += 1
-            except OSError:
-                pass
+    owner = voices_store.owner_of(ref_dir, target)
+    is_own_private = (owner == voices_store.sanitize_user(user))
+    if not (is_own_private or admin):
+        raise HTTPException(
+            status_code=403,
+            detail="You can only delete your own voices; shared voices are admin-only.",
+        )
+
+    removed_conds = voices_store.delete_voice(target)
     logger.info(f"Deleted reference '{target.name}' and {removed_conds} cached conditionals.")
+    voices = voices_store.list_voices(ref_dir, user, admin)
     return JSONResponse(
         content={
             "message": f"Deleted '{target.name}'.",
             "removed_conditionals": removed_conds,
-            "all_reference_files": utils.get_valid_reference_files(),
+            "all_reference_files": [v["filename"] for v in voices],
         }
     )
 
 
 @app.get("/download_voice", tags=["File Management"])
-async def download_voice_endpoint(name: str):
+async def download_voice_endpoint(request: Request, name: str):
     """Download a Custom Voice as a zip: the reference audio plus every cached .pt."""
     ref_dir = get_reference_audio_path(ensure_absolute=True)
-    target = _resolve_reference_audio(ref_dir, name)
+    target = voices_store.resolve(ref_dir, name, current_user(request), is_admin_request(request))
     if target is None:
         raise HTTPException(status_code=404, detail=f"Voice '{name}' not found.")
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.write(target, arcname=target.name)
-        conds_dir = ref_dir / ".conds"
-        if conds_dir.is_dir():
-            for pt in sorted(conds_dir.glob(f"{target.stem}.*.pt")):
-                zf.write(pt, arcname=f".conds/{pt.name}")
+        for pt in voices_store.conds_paths_for(target):
+            zf.write(pt, arcname=f".conds/{pt.name}")
     buf.seek(0)
     headers = {"Content-Disposition": f'attachment; filename="{target.stem}.zip"'}
     return StreamingResponse(buf, media_type="application/zip", headers=headers)
@@ -1302,7 +1337,7 @@ async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
     },
 )
 async def custom_tts_endpoint(
-    request: CustomTTSRequest, background_tasks: BackgroundTasks
+    request: CustomTTSRequest, background_tasks: BackgroundTasks, http_request: Request
 ):
     """
     Generates speech audio from text using specified parameters.
@@ -1357,13 +1392,14 @@ async def custom_tts_endpoint(
                 detail="Missing 'reference_audio_filename' for 'clone' voice mode.",
             )
         ref_dir = get_reference_audio_path(ensure_absolute=True)
-        try:
-            potential_path = utils.safe_resolve_within(ref_dir, request.reference_audio_filename)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid reference audio filename.")
-        if not potential_path.is_file():
+        potential_path = voices_store.resolve(
+            ref_dir, request.reference_audio_filename,
+            current_user(http_request), is_admin_request(http_request),
+        )
+        if potential_path is None or not potential_path.is_file():
             logger.error(
-                f"Reference audio file for cloning not found: {potential_path}"
+                f"Reference audio for cloning not found or not accessible: "
+                f"{request.reference_audio_filename}"
             )
             raise HTTPException(
                 status_code=404,
@@ -1833,13 +1869,15 @@ async def openai_speech_endpoint(request: OpenAISpeechRequest):
     reference_audio_path = get_reference_audio_path(ensure_absolute=True)
     try:
         voice_path_predefined = utils.safe_resolve_within(predefined_voices_path, request.voice)
-        voice_path_reference = utils.safe_resolve_within(reference_audio_path, request.voice)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid voice parameter.")
+    # The API resolves predefined voices and public (shared/legacy) references only;
+    # per-user private voices are UI-only.
+    voice_path_reference = voices_store.resolve_public(reference_audio_path, request.voice)
 
     if voice_path_predefined.is_file():
         audio_prompt_path = voice_path_predefined
-    elif voice_path_reference.is_file():
+    elif voice_path_reference is not None and voice_path_reference.is_file():
         audio_prompt_path = voice_path_reference
     else:
         raise HTTPException(

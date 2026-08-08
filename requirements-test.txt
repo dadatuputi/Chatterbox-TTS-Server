@@ -1,5 +1,10 @@
 # Test-only dependencies. Install with:  pip install -r requirements-test.txt
-# The app's own runtime deps (fastapi/starlette, torch, bcrypt, soundfile, ...) come
-# from the main requirements; these are what the test suite adds on top.
+# The app's own runtime deps (torch, bcrypt, soundfile, ...) come from the main
+# requirements; these are what the test suite adds on top. The API integration tests
+# (tests/api) drive the real FastAPI app and stub the heavy ML deps when absent.
 pytest>=7.4.0
-httpx>=0.24.0          # used by starlette's TestClient
+httpx>=0.24.0          # starlette TestClient
+fastapi>=0.100.0       # only needed if not already installed by the app
+python-multipart>=0.0.5
+aiofiles>=23.0.0
+pydub>=0.25.0

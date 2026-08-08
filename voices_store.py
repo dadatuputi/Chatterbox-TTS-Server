@@ -163,6 +163,26 @@ def resolve(root, filename: str, user: str, is_admin: bool) -> Optional[Path]:
     return None
 
 
+def resolve_public(root, filename: str) -> Optional[Path]:
+    """Resolve a voice visible to everyone (shared + legacy only) — for the API surface.
+
+    Private per-user voices are intentionally not reachable here.
+    """
+    name = Path(filename).name
+    if not name:
+        return None
+    root = Path(root)
+    for cand in (_shared_dir(root) / name, root / name):
+        if cand.is_file() and cand.suffix.lower() in AUDIO_EXTS:
+            return cand
+    return None
+
+
+def owner_of(root, path: Path) -> str:
+    """Owner key for a resolved voice path ('shared', 'legacy', or an email)."""
+    return _meta_for(Path(path), Path(root))["owner"]
+
+
 def conds_paths_for(voice_path: Path) -> List[Path]:
     """Cached .pt files that belong to a voice (beside it, in .conds/)."""
     d = voice_path.parent / CONDS_DIRNAME
