@@ -78,3 +78,38 @@ def test_local_whole_file(tone_wav, tmp_path):
         assert 11.0 < sf.info(dest).duration < 13.0
     finally:
         vi.cleanup_work_dir(work)
+
+
+@requires_ffmpeg
+def test_trim_audio_caps_duration(tone_wav):
+    import soundfile as sf
+    src = tone_wav(seconds=40)
+    assert vi.trim_audio(src, 30) is True
+    assert sf.info(src).duration <= 31.0  # trimmed to ~cap
+
+
+@requires_ffmpeg
+def test_trim_audio_noop_when_short(tone_wav):
+    import soundfile as sf
+    src = tone_wav(seconds=5)
+    before = sf.info(src).duration
+    vi.trim_audio(src, 30)  # already under cap; ffmpeg -t just re-writes
+    assert sf.info(src).duration <= before + 0.2
+
+
+@requires_ffmpeg
+def test_clean_audio_outputs_mono_24k(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    # 6s tone with 1s silence padding each end, stereo 44.1k
+    sr = 44100
+    tone = 0.2 * np.sin(2 * np.pi * 200 * np.arange(sr * 6) / sr)
+    sig = np.concatenate([np.zeros(sr), tone, np.zeros(sr)]).astype("float32")
+    stereo = np.column_stack([sig, sig])
+    p = str(tmp_path / "ref.wav")
+    sf.write(p, stereo, sr)
+    assert vi.clean_audio(p) is True
+    info = sf.info(p)
+    assert info.samplerate == 24000
+    assert info.channels == 1
+    assert info.duration < 7.5  # edge silence trimmed

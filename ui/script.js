@@ -391,12 +391,12 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
         }
 
-        // Hide exaggeration and CFG for turbo model
+        // Exaggeration is a valid emotion control on every model, so always show it.
+        // CFG weight is not used by Turbo's 1-step diffusion, so hide it only there.
+        exaggerationGroup?.classList.remove('hidden');
         if (modelInfo.type === 'turbo') {
-            exaggerationGroup?.classList.add('hidden');
             cfgWeightGroup?.classList.add('hidden');
         } else {
-            exaggerationGroup?.classList.remove('hidden');
             cfgWeightGroup?.classList.remove('hidden');
         }
 
@@ -1400,7 +1400,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     }
 
     // --- File Upload & Refresh ---
-    async function handleFileUpload(fileInput, endpoint, successCallback, buttonToAnimate) {
+    async function handleFileUpload(fileInput, endpoint, successCallback, buttonToAnimate, extraFields) {
         const files = fileInput.files;
         if (!files || files.length === 0) return;
         const originalButtonHTML = buttonToAnimate ? buttonToAnimate.innerHTML : '';
@@ -1411,6 +1411,9 @@ document.addEventListener('DOMContentLoaded', async function () {
         const uploadNotification = showNotification(`Uploading ${files.length} file(s)...`, 'info', 0);
         const formData = new FormData();
         for (const file of files) formData.append('files', file);
+        if (extraFields) {
+            for (const [k, v] of Object.entries(extraFields)) formData.append(k, v);
+        }
         try {
             const response = await fetch(`${API_BASE_URL}${endpoint}`, {
                 method: 'POST',
@@ -1452,7 +1455,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             if (firstUploaded && cloneReferenceSelect && Array.from(cloneReferenceSelect.options).some(opt => opt.value === firstUploaded)) {
                 cloneReferenceSelect.value = firstUploaded;
             }
-        }, cloneImportButton));
+        }, cloneImportButton, { cleanup: document.getElementById('clone-upload-cleanup')?.checked ? 'true' : 'false' }));
     }
 
     if (predefinedVoiceImportButton && predefinedVoiceFileInput) {
@@ -1598,6 +1601,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         fd.append('name', (importNameInput?.value || '').trim());
         fd.append('cookies', importCookiesInput?.value || '');
         fd.append('preview', preview ? 'true' : 'false');
+        fd.append('cleanup', document.getElementById('import-cleanup')?.checked ? 'true' : 'false');
         return fd;
     }
 
@@ -1890,6 +1894,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             const fd = new FormData();
             fd.append('audio', micBlob, `recording.${ext}`);
             fd.append('name', name);
+            fd.append('cleanup', document.getElementById('mic-cleanup')?.checked ? 'true' : 'false');
             micSaveButton.disabled = true;
             setMicStatus('Saving…', 'info');
             try {

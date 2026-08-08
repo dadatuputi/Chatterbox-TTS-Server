@@ -748,7 +748,10 @@ async def get_predefined_voices_api():
 
 # --- File Upload Endpoints ---
 @app.post("/upload_reference", tags=["File Management"])
-async def upload_reference_audio_endpoint(files: List[UploadFile] = File(...)):
+async def upload_reference_audio_endpoint(
+    files: List[UploadFile] = File(...),
+    cleanup: bool = Form(False),
+):
     """
     Handles uploading of reference audio files (.wav, .mp3) for voice cloning.
     Validates files and saves them to the configured reference audio path.
@@ -789,6 +792,13 @@ async def upload_reference_audio_endpoint(files: List[UploadFile] = File(...)):
             logger.info(
                 f"Successfully saved uploaded reference file to: {destination_path}"
             )
+
+            # Optional cleanup (denoise / trim silence / normalize). WAV only.
+            if cleanup and destination_path.suffix.lower() == ".wav":
+                try:
+                    voice_import.clean_audio(str(destination_path))
+                except Exception as e_clean:
+                    logger.warning(f"Cleanup failed for '{safe_filename}', keeping raw: {e_clean}")
 
             max_duration = config_manager.get_int(
                 "audio_output.max_reference_duration_sec", 30
@@ -846,6 +856,7 @@ async def import_reference_url_endpoint(
     name: str = Form("", description="Destination filename stem (required unless preview)."),
     preview: bool = Form(False, description="If true, return the audio without saving it."),
     cookies: str = Form("", description="Optional cookies.txt contents for age-gated/members-only sources."),
+    cleanup: bool = Form(False, description="Denoise, trim edge silence, and loudness-normalize the clip."),
 ):
     """Feature A: import reference audio from a URL or local file, selecting time windows.
 
@@ -927,6 +938,13 @@ async def import_reference_url_endpoint(
         if not os.path.exists(tmp_out):
             raise HTTPException(status_code=422, detail="Import produced no audio.")
 
+        # Optional cleanup (denoise / trim silence / normalize) before preview or save.
+        if cleanup:
+            try:
+                await loop.run_in_executor(None, lambda: voice_import.clean_audio(tmp_out))
+            except voice_import.ImportError_ as e:
+                logger.warning(f"Reference cleanup failed, using raw audio: {e}")
+
         # Duration for the too-short warning (A6).
         try:
             duration = float(librosa.get_duration(path=tmp_out))
@@ -980,6 +998,7 @@ async def import_reference_url_endpoint(
 async def record_reference_endpoint(
     audio: UploadFile = File(..., description="Recorded audio blob (webm/ogg/mp4/wav)."),
     name: str = Form(..., description="Destination filename stem."),
+    cleanup: bool = Form(False, description="Denoise, trim edge silence, and loudness-normalize the recording."),
 ):
     """Save a microphone recording as a reference-audio WAV.
 
@@ -1027,6 +1046,11 @@ async def record_reference_endpoint(
             )
 
         shutil.move(tmp_wav, dest_path)
+        if cleanup:
+            try:
+                await loop.run_in_executor(None, lambda: voice_import.clean_audio(str(dest_path)))
+            except voice_import.ImportError_ as e:
+                logger.warning(f"Recording cleanup failed, using raw audio: {e}")
         try:
             duration = float(librosa.get_duration(path=dest_path))
         except Exception:

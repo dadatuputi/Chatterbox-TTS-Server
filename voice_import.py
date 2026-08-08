@@ -211,6 +211,32 @@ def trim_audio(path: str, max_sec: float) -> bool:
     return True
 
 
+def clean_audio(path: str) -> bool:
+    """Denoise, trim edge silence, and loudness-normalize `path` in place.
+
+    Optional (off by default) — some references have wanted ambience (e.g. a hall's
+    natural reverb) that cleanup would strip. Returns True if applied.
+    """
+    if not has_ffmpeg():
+        return False
+    af = (
+        "silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,"
+        "areverse,"
+        "silenceremove=start_periods=1:start_threshold=-50dB:start_silence=0.05,"
+        "areverse,"
+        "highpass=f=70,"
+        "afftdn=nf=-20,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11"
+    )
+    tmp = path + ".clean.wav"
+    r = _run(["ffmpeg", "-y", "-loglevel", "error", "-i", path,
+              "-af", af, "-ar", "24000", "-ac", "1", tmp])
+    if r.returncode or not os.path.exists(tmp):
+        raise ImportError_("cleanup failed:\n" + r.stderr[-1000:])
+    os.replace(tmp, path)
+    return True
+
+
 def make_work_dir(base_tmp: Optional[str] = None) -> str:
     """Create a scratch directory for segment downloads/cuts."""
     return tempfile.mkdtemp(prefix="voice_import_", dir=base_tmp)
