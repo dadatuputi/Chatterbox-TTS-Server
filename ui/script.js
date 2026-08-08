@@ -1175,7 +1175,7 @@ document.addEventListener('DOMContentLoaded', async function () {
                 return;
             }
             if (currentVoiceMode === 'clone' && (!cloneReferenceSelect || cloneReferenceSelect.value === 'none')) {
-                showNotification("Please select a reference audio file for Voice Cloning.", 'error');
+                showNotification("Please select a reference audio file for Custom Voices.", 'error');
                 return;
             }
 
@@ -1710,6 +1710,107 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     if (importPreviewButton) importPreviewButton.addEventListener('click', handleImportPreview);
     if (importCommitButton) importCommitButton.addEventListener('click', handleImportCommit);
+
+    // --- Feature A: record a reference from the microphone ---
+    const micRecordButton = document.getElementById('mic-record-button');
+    const micSaveButton = document.getElementById('mic-save-button');
+    const micRecordAudio = document.getElementById('mic-record-audio');
+    const micRecordName = document.getElementById('mic-record-name');
+    const micRecordTimer = document.getElementById('mic-record-timer');
+    const micRecordStatus = document.getElementById('mic-record-status');
+    let micRecorder = null, micChunks = [], micStream = null, micBlob = null, micTick = null, micStart = 0;
+
+    function setMicStatus(msg, type = 'info') {
+        if (!micRecordStatus) return;
+        const colors = { info: '', success: 'var(--color-success, #2a7)', warning: 'var(--color-warning, #a70)', error: 'var(--color-danger, #c33)' };
+        micRecordStatus.textContent = msg || '';
+        micRecordStatus.style.color = colors[type] || '';
+    }
+
+    function stopMicTick() { if (micTick) { clearInterval(micTick); micTick = null; } }
+
+    async function startRecording() {
+        if (!navigator.mediaDevices || !window.MediaRecorder) {
+            setMicStatus('This browser does not support in-page recording (needs HTTPS + MediaRecorder).', 'error');
+            return;
+        }
+        try {
+            micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        } catch (e) {
+            setMicStatus('Microphone permission denied or unavailable.', 'error');
+            return;
+        }
+        micChunks = [];
+        micRecorder = new MediaRecorder(micStream);
+        micRecorder.ondataavailable = (ev) => { if (ev.data && ev.data.size) micChunks.push(ev.data); };
+        micRecorder.onstop = () => {
+            micBlob = new Blob(micChunks, { type: micRecorder.mimeType || 'audio/webm' });
+            if (micRecordAudio) {
+                if (micRecordAudio.src) URL.revokeObjectURL(micRecordAudio.src);
+                micRecordAudio.src = URL.createObjectURL(micBlob);
+                micRecordAudio.classList.remove('hidden');
+            }
+            if (micSaveButton) micSaveButton.disabled = false;
+            (micStream.getTracks() || []).forEach(t => t.stop());
+            micStream = null;
+        };
+        micRecorder.start();
+        micStart = Date.now();
+        stopMicTick();
+        micTick = setInterval(() => {
+            const s = Math.floor((Date.now() - micStart) / 1000);
+            if (micRecordTimer) micRecordTimer.textContent = `recording ${fmtTime(s)}`;
+        }, 250);
+        if (micRecordButton) micRecordButton.textContent = '■ Stop';
+        setMicStatus('Recording… read the passage at a natural pace.', 'info');
+    }
+
+    function stopRecording() {
+        if (micRecorder && micRecorder.state !== 'inactive') micRecorder.stop();
+        stopMicTick();
+        if (micRecordTimer) micRecordTimer.textContent = 'stopped';
+        if (micRecordButton) micRecordButton.textContent = '● Record';
+        setMicStatus('Recorded. Name it and Save, or record again.', 'success');
+    }
+
+    if (micRecordButton) {
+        micRecordButton.addEventListener('click', () => {
+            if (micRecorder && micRecorder.state === 'recording') stopRecording();
+            else startRecording();
+        });
+    }
+
+    if (micSaveButton) {
+        micSaveButton.addEventListener('click', async () => {
+            const name = (micRecordName?.value || '').trim();
+            if (!micBlob) { setMicStatus('Record something first.', 'error'); return; }
+            if (!name) { setMicStatus('Give the recording a name.', 'error'); return; }
+            const ext = (micBlob.type.includes('ogg')) ? 'ogg' : (micBlob.type.includes('mp4') ? 'mp4' : 'webm');
+            const fd = new FormData();
+            fd.append('audio', micBlob, `recording.${ext}`);
+            fd.append('name', name);
+            micSaveButton.disabled = true;
+            setMicStatus('Saving…', 'info');
+            try {
+                const response = await fetch(`${API_BASE_URL}/record_reference`, { method: 'POST', body: fd });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.detail || `Save failed (status ${response.status})`);
+                initialReferenceFiles = result.all_reference_files || [];
+                populateReferenceFiles();
+                if (result.filename && cloneReferenceSelect && Array.from(cloneReferenceSelect.options).some(o => o.value === result.filename)) {
+                    cloneReferenceSelect.value = result.filename;
+                }
+                setMicStatus(result.warning || result.message || 'Saved.', result.warning ? 'warning' : 'success');
+                showNotification(result.message || 'Recording saved.', 'success');
+                debouncedSaveState();
+            } catch (e) {
+                console.error('Recording save error:', e);
+                setMicStatus(e.message, 'error');
+            } finally {
+                micSaveButton.disabled = false;
+            }
+        });
+    }
 
     if (predefinedVoiceRefreshButton && predefinedVoiceSelect) {
         predefinedVoiceRefreshButton.addEventListener('click', async () => {

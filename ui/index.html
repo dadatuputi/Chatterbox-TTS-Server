@@ -160,7 +160,7 @@
                                     </label>
                                     <label class="voice-mode__option" data-mode="clone">
                                         <input type="radio" name="voice_mode" value="clone" class="hidden">
-                                        <span>Voice Cloning (Reference)</span>
+                                        <span>Custom Voices</span>
                                     </label>
                                 </div>
                             </div>
@@ -339,6 +339,58 @@
                                             <strong>Consent &amp; use:</strong> only clone voices you have permission to
                                             use. All output is Perth-watermarked and detectable as synthetic.
                                         </p>
+                                    </div>
+                                </details>
+
+                                <!-- Record a reference from the microphone -->
+                                <details id="mic-record-panel" class="collapsible" style="margin-top: 0.75rem;">
+                                    <summary class="collapsible__trigger">
+                                        <span>Record from microphone (create a new reference)</span>
+                                        <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd"
+                                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                                clip-rule="evenodd" />
+                                        </svg>
+                                    </summary>
+                                    <div class="collapsible__content">
+                                        <p class="form-hint mb-2">
+                                            Record ~10–20&nbsp;s of clean speech to clone a voice (yours or someone
+                                            who has consented). Reading the passage below at a natural pace works well.
+                                        </p>
+                                        <details class="collapsible">
+                                            <summary class="collapsible__trigger">
+                                                <span>Passage to read</span>
+                                                <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
+                                                    <path fill-rule="evenodd"
+                                                        d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                                        clip-rule="evenodd" />
+                                                </svg>
+                                            </summary>
+                                            <div class="collapsible__content">
+                                                <p id="mic-script-text" class="form-hint">
+                                                    The rainbow is a division of white light into many beautiful colors.
+                                                    These take the shape of a long round arch, with its path high above,
+                                                    and its two ends apparently beyond the horizon. There is, according
+                                                    to legend, a boiling pot of gold at one end. People look, but no one
+                                                    ever finds it. When a man looks for something beyond his reach, his
+                                                    friends say he is looking for the pot of gold at the end of the rainbow.
+                                                </p>
+                                            </div>
+                                        </details>
+                                        <div class="flex-row items-center gap-2" style="margin-top: 0.5rem;">
+                                            <button type="button" id="mic-record-button" class="btn primary">● Record</button>
+                                            <span class="form-hint">Status:
+                                                <span id="mic-record-timer" class="tabular-nums">idle</span></span>
+                                        </div>
+                                        <audio id="mic-record-audio" controls class="hidden"
+                                            style="width: 100%; margin-top: 0.5rem;"></audio>
+                                        <div class="form-group" style="margin-top: 0.5rem;">
+                                            <label for="mic-record-name" class="form-label small">Save as (name)</label>
+                                            <input type="text" id="mic-record-name" class="form-input small"
+                                                placeholder="e.g. MyVoice  (saved as MyVoice.wav)">
+                                        </div>
+                                        <button type="button" id="mic-save-button" class="btn secondary" disabled>Save recording</button>
+                                        <p id="mic-record-status" class="form-hint" style="margin-top: 0.5rem;"></p>
                                     </div>
                                 </details>
                             </div>
@@ -567,9 +619,9 @@
                                 </li>
                                 <li>Use <strong>Predefined Voices</strong> for consistent, high-quality output. You can
                                     import new ones.</li>
-                                <li>For <strong>Voice Cloning</strong>, upload clean reference audio (<code
-                                        class="code">.wav</code>/<code class="code">.mp3</code>). Quality of reference
-                                    is key.</li>
+                                <li>For <strong>Custom Voices</strong>, upload clean reference audio, import a clip from
+                                    a URL, or record from your microphone (<code class="code">.wav</code>/<code
+                                        class="code">.mp3</code>). Quality of reference is key.</li>
                                 <li>Experiment with <strong>Temperature</strong> and other generation parameters to
                                     fine-tune output.</li>
                                 <li>Adjusting <strong>Speed Factor</strong> away from 1.0 is experimental and may cause
@@ -624,14 +676,14 @@
         <div class="modal__box">
             <h3 class="modal__title">Chunking Voice Consistency Warning</h3>
             <div class="modal__content">
-                <p>You are generating with text splitting enabled and not using Predefined Voices or Voice Cloning with
+                <p>You are generating with text splitting enabled and not using Predefined Voices or Custom Voices with
                     a fixed seed.</p>
                 <p>This combination may result in <strong>different voices for different text chunks</strong>, leading
                     to inconsistent audio.</p>
                 <p>For consistent voices across chunks, please use:</p>
                 <ul>
                     <li>"Predefined Voices" mode.</li>
-                    <li>"Voice Cloning" mode.</li>
+                    <li>"Custom Voices" mode.</li>
                     <li>A specific integer in "Generation Seed" (not random).</li>
                 </ul>
             </div>

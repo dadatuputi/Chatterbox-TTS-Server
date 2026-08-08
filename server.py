@@ -905,6 +905,89 @@ async def import_reference_url_endpoint(
         voice_import.cleanup_work_dir(work_dir)
 
 
+@app.post("/record_reference", tags=["File Management"])
+async def record_reference_endpoint(
+    audio: UploadFile = File(..., description="Recorded audio blob (webm/ogg/mp4/wav)."),
+    name: str = Form(..., description="Destination filename stem."),
+):
+    """Save a microphone recording as a reference-audio WAV.
+
+    The browser records with MediaRecorder (usually webm/opus), so the blob is
+    transcoded to WAV with ffmpeg before validation and storage.
+    """
+    if not voice_import.has_ffmpeg():
+        raise HTTPException(
+            status_code=503,
+            detail="Recording capture is unavailable: ffmpeg is not installed on the server.",
+        )
+    if not name.strip():
+        raise HTTPException(status_code=400, detail="A name is required to save the recording.")
+
+    ref_dir = get_reference_audio_path(ensure_absolute=True)
+    stem = Path(name.strip()).stem
+    try:
+        dest_path = utils.safe_resolve_within(ref_dir, f"{stem}.wav")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    work_dir = voice_import.make_work_dir()
+    # Keep the uploaded extension so ffmpeg can sniff the container.
+    src_ext = Path(audio.filename or "").suffix or ".webm"
+    raw_path = os.path.join(work_dir, f"_recorded{src_ext}")
+    tmp_wav = os.path.join(work_dir, "_recorded.wav")
+    try:
+        with open(raw_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+
+        loop = asyncio.get_running_loop()
+        # Downmix to mono 24 kHz WAV to match the model's sample rate.
+        result = await loop.run_in_executor(
+            None,
+            lambda: subprocess.run(
+                ["ffmpeg", "-y", "-loglevel", "error", "-i", raw_path,
+                 "-ac", "1", "-ar", "24000", tmp_wav],
+                capture_output=True, text=True,
+            ),
+        )
+        if result.returncode or not os.path.exists(tmp_wav):
+            raise HTTPException(
+                status_code=422,
+                detail="Could not decode the recording: " + (result.stderr[-500:] or "unknown error"),
+            )
+
+        shutil.move(tmp_wav, dest_path)
+        max_duration = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
+        is_valid, validation_msg = utils.validate_reference_audio(dest_path, max_duration)
+        if not is_valid:
+            dest_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=validation_msg)
+
+        try:
+            duration = float(librosa.get_duration(path=dest_path))
+        except Exception:
+            duration = 0.0
+        warning = ""
+        if 0 < duration < 6.0:
+            warning = (
+                f"Recording is only {duration:.1f}s — under 6s is too short for a stable "
+                "clone. Record a longer sample."
+            )
+        logger.info(f"Saved recorded reference to: {dest_path} ({duration:.1f}s)")
+        return JSONResponse(
+            content={
+                "message": f"Saved '{dest_path.name}' ({duration:.1f}s).",
+                "filename": dest_path.name,
+                "duration": round(duration, 2),
+                "warning": warning,
+                "all_reference_files": utils.get_valid_reference_files(),
+            },
+            status_code=200,
+        )
+    finally:
+        await audio.close()
+        voice_import.cleanup_work_dir(work_dir)
+
+
 @app.post("/upload_predefined_voice", tags=["File Management"])
 async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
     """
