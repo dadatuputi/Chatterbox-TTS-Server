@@ -13,6 +13,10 @@ server:
   auth_password: password
   # Optional bearer token for API clients (Open WebUI, scripts). Empty disables bearer auth.
   api_token: ''
+  # Admin emails (matched against the Cloudflare Access identity header). When set, only
+  # these users see/change server settings; everyone else gets voices + generation only.
+  # Empty = single-user (everyone is admin). Example: ['you@example.com']
+  admin_emails: []
   log_file_path: logs/tts_server.log
   log_file_max_size_mb: 10
   log_file_backup_count: 5

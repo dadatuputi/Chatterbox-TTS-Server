@@ -1878,3 +1878,6 @@ a.btn.disabled {
     border-top: 1px dashed var(--color-border-subtle, #e2e8f0);
     padding-top: var(--space-3, 0.75rem);
 }
+
+/* Admin-only UI: hidden for non-admin (friend) sessions. Enforcement is server-side. */
+body.non-admin .admin-only { display: none !important; }

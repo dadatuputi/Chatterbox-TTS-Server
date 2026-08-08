@@ -195,6 +195,22 @@ def _fetch_url(source: str, segments, dest: str, work_dir: str, cookies_path: st
     _join(parts, dest, work_dir)
 
 
+def trim_audio(path: str, max_sec: float) -> bool:
+    """Trim the audio at `path` in place to the first `max_sec` seconds.
+
+    Returns True if a trim was performed. Intended to enforce a maximum reference
+    duration without rejecting the file (the model only uses the opening seconds).
+    """
+    if not has_ffmpeg() or not max_sec or max_sec <= 0:
+        return False
+    tmp = path + ".trim.wav"
+    r = _run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-t", str(max_sec), tmp])
+    if r.returncode or not os.path.exists(tmp):
+        raise ImportError_("trim failed:\n" + r.stderr[-1000:])
+    os.replace(tmp, path)
+    return True
+
+
 def make_work_dir(base_tmp: Optional[str] = None) -> str:
     """Create a scratch directory for segment downloads/cuts."""
     return tempfile.mkdtemp(prefix="voice_import_", dir=base_tmp)

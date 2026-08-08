@@ -64,6 +64,7 @@ from config import (
     get_full_config_for_template,
     get_audio_output_format,
     get_auth_config,
+    get_admin_emails,
 )
 
 import auth  # HTTP Basic / bearer-token middleware (Feature B)
@@ -460,14 +461,18 @@ async def get_model_info_endpoint():
 
 # --- API Endpoint for Initial UI Data ---
 @app.get("/api/ui/initial-data", tags=["UI Helpers"])
-async def get_ui_initial_data():
+async def get_ui_initial_data(request: Request):
     """
     Provides all necessary initial data for the UI to render,
     including configuration, file lists, presets, and model information.
     """
     logger.info("Request received for /api/ui/initial-data.")
     try:
+        admin = is_admin_request(request)
         full_config = get_full_config_for_template()
+        if not admin:
+            # Friends never receive server secrets in the config payload.
+            full_config = _redact_config_for_non_admin(full_config)
         reference_files = utils.get_valid_reference_files()
         predefined_voices = utils.get_predefined_voices()
 
@@ -511,6 +516,7 @@ async def get_ui_initial_data():
             "capabilities": {
                 "import": voice_import.import_capabilities(),
                 "auth_enabled": bool(auth_cfg.get("enabled")),
+                "is_admin": admin,
             },
         }
     except Exception as e:
@@ -518,6 +524,47 @@ async def get_ui_initial_data():
         raise HTTPException(
             status_code=500, detail="Failed to load initial data for UI."
         )
+
+
+# --- Admin identity helpers ---
+# Sensitive config keys never sent to a non-admin browser.
+_SENSITIVE_SERVER_KEYS = ("auth_password", "auth_password_hash", "api_token", "admin_emails")
+
+
+def is_admin_request(request: Request) -> bool:
+    """Whether the current request is from an admin.
+
+    - If admin_emails is configured, the Cloudflare Access identity header
+      (Cf-Access-Authenticated-User-Email) must match one of them. This is the
+      Cloudflare Access deployment path; the app is only reachable through the tunnel,
+      so the header is set by Cloudflare and cannot be spoofed by a friend.
+    - Otherwise fall back to app-level auth (Feature B): a Basic login is admin, a
+      bearer-token client is not, and with auth off it's single-user (admin).
+    """
+    admin_emails = get_admin_emails()
+    if admin_emails:
+        email = request.headers.get("cf-access-authenticated-user-email", "").strip().lower()
+        if email:
+            return email in admin_emails
+        # No CF identity present but an admin list is set — only an app Basic login qualifies.
+        return getattr(request.state, "auth_method", None) == "basic"
+    method = getattr(request.state, "auth_method", None)
+    if method == "bearer":
+        return False
+    return getattr(request.state, "is_admin", True)
+
+
+def _redact_config_for_non_admin(full_config: dict) -> dict:
+    """Return a copy of the config with sensitive server keys blanked out."""
+    import copy
+
+    redacted = copy.deepcopy(full_config)
+    server = redacted.get("server")
+    if isinstance(server, dict):
+        for key in _SENSITIVE_SERVER_KEYS:
+            if key in server:
+                server[key] = "" if not isinstance(server[key], list) else []
+    return redacted
 
 
 # --- Configuration Management API Endpoints ---
@@ -533,6 +580,15 @@ async def save_settings_endpoint(request: Request):
         if not isinstance(partial_update, dict):
             raise ValueError("Request body must be a JSON object for /save_settings.")
         logger.debug(f"Received partial config data to save: {partial_update}")
+
+        # Non-admins may only persist their own UI state, never server configuration.
+        if not is_admin_request(request):
+            disallowed = [k for k in partial_update if k != "ui_state"]
+            if disallowed:
+                logger.info(f"Non-admin save_settings limited to ui_state; dropped: {disallowed}")
+            partial_update = {"ui_state": partial_update["ui_state"]} if "ui_state" in partial_update else {}
+            if not partial_update:
+                return UpdateStatusResponse(message="No changes saved.", restart_needed=False)
 
         if config_manager.update_and_save(partial_update):
             restart_needed = any(
@@ -565,8 +621,10 @@ async def save_settings_endpoint(request: Request):
 @app.post(
     "/reset_settings", response_model=UpdateStatusResponse, tags=["Configuration"]
 )
-async def reset_settings_endpoint():
+async def reset_settings_endpoint(request: Request):
     """Resets the configuration in config.yaml back to hardcoded defaults."""
+    if not is_admin_request(request):
+        raise HTTPException(status_code=403, detail="Admin only.")
     logger.warning("Request received to reset all configurations to default values.")
     try:
         if config_manager.reset_and_save():
@@ -591,11 +649,13 @@ async def reset_settings_endpoint():
 @app.post(
     "/restart_server", response_model=UpdateStatusResponse, tags=["Configuration"]
 )
-async def restart_server_endpoint():
+async def restart_server_endpoint(request: Request):
     """
     Triggers a hot-swap of the TTS model engine.
     Unloads the current model, clears VRAM, and loads the model defined in config.
     """
+    if not is_admin_request(request):
+        raise HTTPException(status_code=403, detail="Admin only.")
     logger.info("Request received for /restart_server (Model Hot-Swap).")
 
     try:
@@ -627,11 +687,13 @@ async def restart_server_endpoint():
 
 
 @app.post("/api/unload", tags=["Configuration"])
-async def unload_model_endpoint():
+async def unload_model_endpoint(request: Request):
     """
     Unloads the TTS model and releases all CUDA/GPU memory.
     The model will need to be reloaded (via /restart_server) before TTS requests can be processed.
     """
+    if not is_admin_request(request):
+        raise HTTPException(status_code=403, detail="Admin only.")
     logger.info("Request received for /api/unload (Model Unload).")
 
     try:
@@ -731,8 +793,15 @@ async def upload_reference_audio_endpoint(files: List[UploadFile] = File(...)):
             max_duration = config_manager.get_int(
                 "audio_output.max_reference_duration_sec", 30
             )
+            # An over-long upload should be trimmed to the cap, not rejected.
+            if max_duration and max_duration > 0 and destination_path.suffix.lower() == ".wav":
+                try:
+                    dur = float(librosa.get_duration(path=destination_path))
+                    _enforce_max_duration(destination_path, max_duration, dur)
+                except Exception as e_trim:
+                    logger.warning(f"Could not check/trim duration of '{safe_filename}': {e_trim}")
             is_valid, validation_msg = utils.validate_reference_audio(
-                destination_path, max_duration
+                destination_path, None if destination_path.suffix.lower() == ".wav" else max_duration
             )
             if not is_valid:
                 logger.warning(
@@ -882,11 +951,12 @@ async def import_reference_url_endpoint(
                 headers["X-Import-Warning"] = warning
             return Response(content=audio_bytes, media_type="audio/wav", headers=headers)
 
-        # Commit mode: move into the reference-audio dir and validate.
+        # Commit mode: move into the reference-audio dir, trimming to the cap.
         assert dest_path is not None
         shutil.move(tmp_out, dest_path)
         max_duration = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
-        is_valid, validation_msg = utils.validate_reference_audio(dest_path, max_duration)
+        duration, warning = _enforce_max_duration(dest_path, max_duration, duration, warning)
+        is_valid, validation_msg = utils.validate_reference_audio(dest_path, None)
         if not is_valid:
             dest_path.unlink(missing_ok=True)
             raise HTTPException(status_code=422, detail=validation_msg)
@@ -957,22 +1027,22 @@ async def record_reference_endpoint(
             )
 
         shutil.move(tmp_wav, dest_path)
-        max_duration = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
-        is_valid, validation_msg = utils.validate_reference_audio(dest_path, max_duration)
-        if not is_valid:
-            dest_path.unlink(missing_ok=True)
-            raise HTTPException(status_code=422, detail=validation_msg)
-
         try:
             duration = float(librosa.get_duration(path=dest_path))
         except Exception:
             duration = 0.0
+        max_duration = config_manager.get_int("audio_output.max_reference_duration_sec", 30)
         warning = ""
         if 0 < duration < 6.0:
             warning = (
                 f"Recording is only {duration:.1f}s — under 6s is too short for a stable "
                 "clone. Record a longer sample."
             )
+        duration, warning = _enforce_max_duration(dest_path, max_duration, duration, warning)
+        is_valid, validation_msg = utils.validate_reference_audio(dest_path, None)
+        if not is_valid:
+            dest_path.unlink(missing_ok=True)
+            raise HTTPException(status_code=422, detail=validation_msg)
         logger.info(f"Saved recorded reference to: {dest_path} ({duration:.1f}s)")
         return JSONResponse(
             content={
@@ -987,6 +1057,26 @@ async def record_reference_endpoint(
     finally:
         await audio.close()
         voice_import.cleanup_work_dir(work_dir)
+
+
+def _enforce_max_duration(path: Path, max_sec, duration: float, warning: str = ""):
+    """Trim an over-long reference to the cap instead of rejecting it.
+
+    The model only uses the opening seconds of a reference, so exceeding the maximum
+    duration should never block — just trim to the limit. Returns the (possibly
+    updated) duration and the unchanged warning.
+    """
+    if max_sec and duration and duration > max_sec:
+        try:
+            voice_import.trim_audio(str(path), max_sec)
+            try:
+                duration = float(librosa.get_duration(path=str(path)))
+            except Exception:
+                duration = float(max_sec)
+            logger.info(f"Trimmed reference '{path.name}' to {duration:.1f}s (cap {max_sec}s).")
+        except Exception as e:
+            logger.warning(f"Could not trim over-long reference '{path}': {e}")
+    return duration, warning
 
 
 def _resolve_reference_audio(ref_dir: Path, name: str) -> Optional[Path]:

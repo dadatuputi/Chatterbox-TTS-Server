@@ -44,6 +44,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "auth_password": "password",  # Plaintext password fallback. Prefer auth_password_hash.
         "auth_password_hash": "",  # bcrypt hash of the password (preferred over auth_password).
         "api_token": "",  # Optional bearer token for the /v1/audio/* API surface. Empty disables bearer auth.
+        "admin_emails": [],  # Emails treated as admin (Cloudflare Access identity). Empty = single-user (everyone admin).
         "log_file_path": str(
             DEFAULT_LOGS_PATH / "tts_server.log"
         ),  # Path to the server log file.
@@ -771,7 +772,19 @@ def get_auth_config() -> Dict[str, Any]:
         "password": config_manager.get_string("server.auth_password", ""),
         "password_hash": config_manager.get_string("server.auth_password_hash", ""),
         "api_token": config_manager.get_string("server.api_token", ""),
+        "admin_emails": get_admin_emails(),
     }
+
+
+def get_admin_emails() -> list:
+    """Lowercased list of admin emails (matched against Cloudflare Access identity).
+
+    Empty means single-user mode: everyone who can reach the app is treated as admin.
+    """
+    raw = config_manager.get("server.admin_emails", []) or []
+    if isinstance(raw, str):
+        raw = [raw]
+    return [str(e).strip().lower() for e in raw if str(e).strip()]
 
 
 # Audio Output Settings Accessors

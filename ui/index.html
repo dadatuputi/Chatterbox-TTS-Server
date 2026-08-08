@@ -72,7 +72,7 @@
                                         <span id="model-status-indicator" class="status-dot neutral"></span>
                                         <span id="model-status-text" class="model-status__text">Checking model...</span>
                                     </div>
-                                    <button id="apply-model-btn" type="button" class="btn secondary wide hidden">
+                                    <button id="apply-model-btn" type="button" class="btn secondary wide hidden admin-only">
                                         <svg class="btn__icon" xmlns="http://www.w3.org/2000/svg" fill="none"
                                             viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                                             <path stroke-linecap="round" stroke-linejoin="round"
@@ -504,7 +504,7 @@
                                 </div>
                             </details>
 
-                            <details class="collapsible" open>
+                            <details class="collapsible admin-only" id="server-config-section" open>
                                 <summary class="collapsible__trigger">
                                     <span>Server Configuration</span>
                                     <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
@@ -609,7 +609,7 @@
                             </details>
                         </div>
 
-                        <div class="card__footer">
+                        <div class="card__footer admin-only">
                             <button id="reset-settings-btn" type="button" class="btn ghost">Reset All Settings</button>
                             <span class="form-hint ml-2">Resets settings to their defaults.</span>
                         </div>

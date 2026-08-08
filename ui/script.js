@@ -1551,6 +1551,11 @@ document.addEventListener('DOMContentLoaded', async function () {
 
     // --- Feature A: URL / local-file reference import ---
     function applyCapabilities() {
+        // Admin-only UI (server config, reset, model hot-swap) is hidden for friends.
+        // Enforcement is server-side; this just declutters their view.
+        const isAdmin = appCapabilities?.is_admin !== false; // default admin if unknown
+        document.body.classList.toggle('non-admin', !isAdmin);
+
         const importAvailable = appCapabilities?.import?.available;
         const urlTab = document.getElementById('voice-tab-url');
         if (urlTab) {
