@@ -36,6 +36,7 @@ except ImportError:
 
 # Import the singleton config_manager
 from config import config_manager
+import engine_ext  # fork: model-tagged .pt conditioning cache (kept out of synthesize)
 
 logger = logging.getLogger(__name__)
 
@@ -116,12 +117,9 @@ loaded_model_class_name: Optional[str] = None  # "ChatterboxTTS" or "ChatterboxT
 # Key: (resolved_path, file_mtime, exaggeration) — mtime invalidates if file changes.
 _conds_cache: dict = {}
 
-# Class of the model's Conditionals object, captured lazily the first time we compute
-# conditionals. Needed to load a persisted .pt (the class exposes a .load classmethod).
+# fork: class of the model's Conditionals object, captured lazily on first compute;
+# passed to engine_ext to load a persisted .pt. Persistence logic lives in engine_ext.
 _cond_class = None
-
-# Subdirectory (beside a voice's audio file) that holds persisted conditionals.
-_CONDS_DIRNAME = ".conds"
 
 
 def _conds_cache_key(path: str, exaggeration: float) -> tuple:
@@ -130,55 +128,6 @@ def _conds_cache_key(path: str, exaggeration: float) -> tuple:
     except OSError:
         mtime = 0.0
     return (path, mtime, exaggeration)
-
-
-def _persist_conds_enabled() -> bool:
-    return config_manager.get_bool("tts_engine.persist_conditionals", True)
-
-
-def persisted_conds_path(audio_prompt_path: str, model_type: str) -> str:
-    """Model-tagged .pt path beside the source audio: <dir>/.conds/<stem>.<model>.pt.
-
-    A .pt holds conditioning tensors specific to ONE model architecture, so the
-    model type is part of the filename and a .pt is only ever loaded for the model
-    that produced it. Exaggeration is NOT in the name — generate() overrides the
-    baked emotion value at generation time.
-    """
-    directory = os.path.dirname(audio_prompt_path)
-    stem = os.path.splitext(os.path.basename(audio_prompt_path))[0]
-    return os.path.join(directory, _CONDS_DIRNAME, f"{stem}.{model_type}.pt")
-
-
-def _try_load_persisted_conds(audio_prompt_path: str, model_type: str):
-    """Return a Conditionals object from disk if a fresh, matching .pt exists, else None."""
-    if not _persist_conds_enabled() or _cond_class is None or not model_type:
-        return None
-    pt = persisted_conds_path(audio_prompt_path, model_type)
-    try:
-        if not os.path.exists(pt):
-            return None
-        # Ignore a stale cache if the source audio was replaced after baking.
-        if os.path.getmtime(pt) < os.path.getmtime(audio_prompt_path):
-            return None
-        conds = _cond_class.load(pt, map_location=model_device)
-        logger.info(f"Loaded persisted conditionals: {pt}")
-        return conds
-    except Exception as e:
-        logger.warning(f"Could not load persisted conditionals '{pt}': {e}")
-        return None
-
-
-def _try_save_persisted_conds(audio_prompt_path: str, model_type: str, conds) -> None:
-    """Persist conditionals to a model-tagged .pt beside the source audio (best effort)."""
-    if not _persist_conds_enabled() or not model_type or conds is None:
-        return
-    pt = persisted_conds_path(audio_prompt_path, model_type)
-    try:
-        os.makedirs(os.path.dirname(pt), exist_ok=True)
-        conds.save(pt)
-        logger.info(f"Persisted conditionals: {pt}")
-    except Exception as e:
-        logger.warning(f"Could not persist conditionals '{pt}': {e}")
 
 
 def set_seed(seed_value: int):
@@ -541,7 +490,8 @@ def synthesize(
                 logger.debug(f"Voice cache hit: {audio_prompt_path}")
             else:
                 # Try a persisted, model-tagged .pt before re-encoding from audio.
-                persisted = _try_load_persisted_conds(audio_prompt_path, loaded_model_type or "")
+                persisted = engine_ext.try_load_conds(
+                    audio_prompt_path, loaded_model_type or "", _cond_class, model_device)
                 if persisted is not None:
                     chatterbox_model.conds = persisted
                     _conds_cache[conds_key] = persisted
@@ -579,7 +529,7 @@ def synthesize(
                 global _cond_class
                 if _cond_class is None:
                     _cond_class = type(chatterbox_model.conds)
-                _try_save_persisted_conds(
+                engine_ext.try_save_conds(
                     audio_prompt_path, loaded_model_type or "", chatterbox_model.conds
                 )
 
