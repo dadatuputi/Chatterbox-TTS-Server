@@ -145,7 +145,14 @@
                                         step="10" value="120" class="form-slider short">
                                     <span id="chunk-size-value" class="slider-value tabular-nums">120</span>
                                 </div>
+                                <div class="flex-row items-center gap-2">
+                                    <button type="button" id="best-of-n-btn" class="btn secondary">Generate variations</button>
+                                    <label for="best-of-n" class="form-label small">takes</label>
+                                    <input type="number" id="best-of-n" min="2" max="6" step="1" value="3"
+                                        class="form-input small" style="width:4rem;">
+                                </div>
                             </div>
+                            <div id="best-of-n-results"></div>
                             <p id="chunk-explanation" class="form-hint mb-6 hidden">
                                 Splitting is essential for longer texts like articles or audiobook chapters. Recommended
                                 chunk size: ~150-400 characters.

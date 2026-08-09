@@ -116,6 +116,9 @@ def app_env(tmp_path, monkeypatch):
                         lambda ensure_absolute=True: voices, raising=True)
     monkeypatch.setattr(config, "get_output_path",
                         lambda ensure_absolute=True: outputs, raising=True)
+    # Never let a test write the repo's config.yaml.
+    monkeypatch.setattr(config.config_manager, "save_config_yaml", lambda: True, raising=False)
+    monkeypatch.setattr(config.config_manager, "update_and_save", lambda partial: True, raising=False)
 
     if "server" in sys.modules:
         del sys.modules["server"]

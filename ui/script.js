@@ -1680,6 +1680,71 @@ document.addEventListener('DOMContentLoaded', async function () {
     const historyRefreshBtn = document.getElementById('history-refresh');
     if (historyRefreshBtn) historyRefreshBtn.addEventListener('click', loadHistory);
 
+    // --- Phase 4c: best-of-N take picker ---
+    async function generateVariations(n) {
+        const container = document.getElementById('best-of-n-results');
+        if (!container) return;
+        const base = getTTSFormData();
+        if (!base || !base.text || !base.text.trim()) {
+            showNotification('Enter text first.', 'warning');
+            return;
+        }
+        container.innerHTML = '<p class="form-hint">Generating variations…</p>';
+        const rows = [];
+        for (let i = 0; i < n; i++) {
+            const seed = 1000 + i;  // distinct non-zero seeds → each take is reproducible
+            const body = { ...base, seed, save_to_history: false, stream: false };
+            try {
+                const resp = await fetch(`${API_BASE_URL}/tts`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!resp.ok) continue;
+                const blob = await resp.blob();
+                rows.push({ seed, url: URL.createObjectURL(blob), i });
+            } catch (e) { /* skip this take */ }
+        }
+        container.innerHTML = '';
+        if (!rows.length) { container.innerHTML = '<p class="form-hint">No variations produced.</p>'; return; }
+        rows.forEach(({ seed, url, i }) => {
+            const row = document.createElement('div'); row.className = 'history-row';
+            const label = document.createElement('span'); label.className = 'history-row__label';
+            label.textContent = `Take ${i + 1} (seed ${seed})`;
+            const audio = document.createElement('audio'); audio.controls = true; audio.src = url;
+            const keep = document.createElement('button'); keep.className = 'btn primary small'; keep.textContent = 'Keep';
+            keep.addEventListener('click', async () => {
+                // Re-generate the chosen seed with history on (deterministic reproduction).
+                const kept = { ...base, seed, save_to_history: true, stream: false };
+                const rr = await fetch(`${API_BASE_URL}/tts`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(kept),
+                });
+                if (rr.ok) {
+                    const kb = await rr.blob();
+                    initializeWaveSurfer(URL.createObjectURL(kb), {
+                        outputUrl: URL.createObjectURL(kb), filename: `take_${i + 1}.wav`,
+                        submittedVoiceMode: base.voice_mode,
+                    });
+                    showNotification(`Kept take ${i + 1}.`, 'success');
+                    container.innerHTML = '';
+                    loadHistory();
+                } else {
+                    showNotification('Could not keep that take.', 'error');
+                }
+            });
+            row.append(label, audio, keep);
+            container.appendChild(row);
+        });
+    }
+
+    const bestOfNBtn = document.getElementById('best-of-n-btn');
+    if (bestOfNBtn) {
+        bestOfNBtn.addEventListener('click', () => {
+            const n = Math.max(2, Math.min(6, parseInt(document.getElementById('best-of-n')?.value, 10) || 3));
+            generateVariations(n);
+        });
+    }
+
     function setImportStatus(msg, type = 'info') {
         if (!importStatus) return;
         const colors = { info: '', success: 'var(--color-success, #2a7)', warning: 'var(--color-warning, #a70)', error: 'var(--color-danger, #c33)' };

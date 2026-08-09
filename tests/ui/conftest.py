@@ -95,6 +95,10 @@ def live_server(tmp_path_factory):
     config.get_reference_audio_path = lambda ensure_absolute=True: ref
     config.get_predefined_voices_path = lambda ensure_absolute=True: voices
     config.get_output_path = lambda ensure_absolute=True: outputs
+    # Never write the repo's config.yaml from a test (the UI persists ui_state on
+    # interaction). Keep saves in-memory only.
+    config.config_manager.save_config_yaml = lambda: True
+    config.config_manager.update_and_save = lambda partial: True
 
     server = importlib.import_module("server")
     server.get_reference_audio_path = lambda ensure_absolute=True: ref
