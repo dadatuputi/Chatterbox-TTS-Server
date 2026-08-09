@@ -96,6 +96,21 @@
                                         <span id="char-count">0</span> Characters
                                     </div>
                                 </div>
+                                <details class="collapsible" id="presets-collapsible" style="margin-top:0.5rem;">
+                                    <summary class="collapsible__trigger">
+                                        <span>Load an example preset</span>
+                                        <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
+                                            <path fill-rule="evenodd"
+                                                d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z"
+                                                clip-rule="evenodd" />
+                                        </svg>
+                                    </summary>
+                                    <div class="collapsible__content">
+                                        <div id="presets-container" class="flex-row flex-wrap gap-2">
+                                            <p id="presets-placeholder" class="form-hint">Loading presets...</p>
+                                        </div>
+                                    </div>
+                                </details>
                             </div>
 
                             <!-- Paralinguistic Tags Section (Turbo only) -->
@@ -438,14 +453,7 @@
                                 </div>
                             </div>
 
-                            <div class="form-group">
-                                <label class="form-label mb-2">Load Example Preset:</label>
-                                <div id="presets-container" class="flex-row flex-wrap gap-2">
-                                    <p id="presets-placeholder" class="form-hint">Loading presets...</p>
-                                </div>
-                            </div>
-
-                            <details class="collapsible" open>
+                            <details class="collapsible js-accordion" data-accordion="settings" open>
                                 <summary class="collapsible__trigger">
                                     <span>Generation Parameters</span>
                                     <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">
@@ -545,7 +553,7 @@
                                 </svg>
                                 Server settings are locked (admin only).
                             </div>
-                            <details class="collapsible admin-only" id="server-config-section" open>
+                            <details class="collapsible admin-only js-accordion" data-accordion="settings" id="server-config-section">
                                 <summary class="collapsible__trigger">
                                     <span>Server Configuration</span>
                                     <svg class="collapsible__icon" viewBox="0 0 20 20" fill="currentColor">

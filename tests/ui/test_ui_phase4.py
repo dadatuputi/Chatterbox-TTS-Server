@@ -29,7 +29,10 @@ def test_admin_sees_unlocked_note(open_page):
     page = open_page("admin@x.com")
     page.goto("/")
     page.wait_for_selector("#server-config-section", state="visible", timeout=10000)
+    # Settings is collapsed by default (accordion) — open it to reveal the note.
+    page.locator("#server-config-section > summary").click()
     note = page.locator("#settings-unlocked-note")
+    note.wait_for(state="visible", timeout=5000)
     assert "Unlocked" in note.inner_text()
     assert "admin@x.com" in note.inner_text()
 

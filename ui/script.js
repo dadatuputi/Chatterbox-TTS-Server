@@ -1745,6 +1745,17 @@ document.addEventListener('DOMContentLoaded', async function () {
         });
     }
 
+    // --- Phase 4d: accordion — opening one section closes others in its group ---
+    document.querySelectorAll('details.js-accordion').forEach(d => {
+        d.addEventListener('toggle', () => {
+            if (!d.open) return;
+            const group = d.dataset.accordion;
+            document.querySelectorAll(`details.js-accordion[data-accordion="${group}"]`).forEach(other => {
+                if (other !== d) other.open = false;
+            });
+        });
+    });
+
     function setImportStatus(msg, type = 'info') {
         if (!importStatus) return;
         const colors = { info: '', success: 'var(--color-success, #2a7)', warning: 'var(--color-warning, #a70)', error: 'var(--color-danger, #c33)' };
