@@ -99,6 +99,11 @@ class CustomTTSRequest(BaseModel):
         description="If true, returns a StreamingResponse with WAV audio yielded as each chunk is synthesized. output_format is ignored when streaming.",
     )
 
+    save_to_history: bool = Field(
+        True,
+        description="If false, the generation is not saved to the user's history. Used for best-of-N trial takes; the kept take is re-generated with save_to_history=true.",
+    )
+
 
 class ErrorResponse(BaseModel):
     """Standard error response model for API errors."""

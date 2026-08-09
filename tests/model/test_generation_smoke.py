@@ -59,6 +59,34 @@ def test_generates_valid_audio(loaded_model):
     assert _length(wav) > sr * 0.5
 
 
+def test_save_to_history_flag(loaded_model, tmp_path, monkeypatch):
+    """save_to_history=false must not write to history; =true must (best-of-N enabler)."""
+    import importlib
+    import history_store as hs
+    from starlette.testclient import TestClient
+
+    out = tmp_path / "outputs"; out.mkdir()
+    import config
+    monkeypatch.setattr(config, "get_output_path", lambda ensure_absolute=True: out, raising=False)
+    server = importlib.import_module("server")
+    monkeypatch.setattr(server, "get_output_path", lambda ensure_absolute=True: out, raising=False)
+    client = TestClient(server.app, raise_server_exceptions=False)
+
+    ref = _first_voice()
+    body = {"text": "history flag check.", "voice_mode": "clone" if ref else "predefined",
+            "reference_audio_filename": os.path.basename(ref) if ref else None,
+            "seed": 7, "save_to_history": False}
+    # Trial take: no history.
+    client.post("/tts", json={k: v for k, v in body.items() if v is not None},
+                headers={"Cf-Access-Authenticated-User-Email": "hist@x.com"})
+    assert hs.list_for_user(out, "hist@x.com") == []
+    # Kept take: saved.
+    body["save_to_history"] = True
+    client.post("/tts", json={k: v for k, v in body.items() if v is not None},
+                headers={"Cf-Access-Authenticated-User-Email": "hist@x.com"})
+    assert len(hs.list_for_user(out, "hist@x.com")) == 1
+
+
 def test_two_seeds_differ(loaded_model):
     """Sanity: different seeds should not produce byte-identical output."""
     ref = _first_voice()

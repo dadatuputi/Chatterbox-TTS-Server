@@ -64,6 +64,21 @@ def test_delete_scoped(app_env):
     assert name not in {i["filename"] for i in client.get("/api/history", headers=hdr(ME)).json()["items"]}
 
 
+def test_tts_accepts_save_to_history_flag(app_env):
+    """The best-of-N flag is accepted by /tts (not a 422); real effect is model-gated."""
+    client = app_env.make_client()
+    _upload = client.post
+    # Need a resolvable shared voice so we get past resolution to the (mocked) engine.
+    import voices_store as vs
+    (app_env.ref / "shared").mkdir(exist_ok=True)
+    (app_env.ref / "shared" / "V.wav").write_bytes(b"RIFFxxxxWAVE")
+    r = client.post("/tts", json={
+        "text": "hi", "voice_mode": "clone", "reference_audio_filename": "V.wav",
+        "seed": 3, "save_to_history": False,
+    }, headers=hdr(ME))
+    assert r.status_code != 422, r.text  # field accepted (fails later at mocked synth)
+
+
 def test_clear_group_permissions(app_env):
     _seed(app_env.outputs)
     client = app_env.make_client()

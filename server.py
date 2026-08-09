@@ -1919,11 +1919,13 @@ async def custom_tts_endpoint(
                 status_code=500, detail=f"Failed to save audio file: {e}"
             )
 
-    # Auto-save the finished generation into the requester's history.
-    voice_label = (
-        request.reference_audio_filename or request.predefined_voice_id or "voice"
-    )
-    _save_to_history(http_request, encoded_audio_bytes, voice_label, output_format_str)
+    # Auto-save the finished generation into the requester's history (unless this is a
+    # best-of-N trial take, which sets save_to_history=false until the user keeps one).
+    if request.save_to_history:
+        voice_label = (
+            request.reference_audio_filename or request.predefined_voice_id or "voice"
+        )
+        _save_to_history(http_request, encoded_audio_bytes, voice_label, output_format_str)
 
     return StreamingResponse(
         io.BytesIO(encoded_audio_bytes), media_type=media_type, headers=headers
