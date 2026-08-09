@@ -70,6 +70,7 @@ from config import (
 import auth  # HTTP Basic / bearer-token middleware (Feature B)
 import voice_import  # URL / local reference import (Feature A)
 import voices_store  # Per-user voice ownership/visibility on the filesystem
+import history_store  # Per-user generation history on the filesystem
 import engine  # TTS Engine interface
 from models import (  # Pydantic models
     CustomTTSRequest,
@@ -1221,6 +1222,78 @@ async def download_voice_endpoint(request: Request, name: str):
     return StreamingResponse(buf, media_type="application/zip", headers=headers)
 
 
+def _save_to_history(request: Request, audio_bytes: bytes, voice: str, ext: str = "wav") -> None:
+    """Best-effort: save a finished generation into the requester's history."""
+    try:
+        out_root = get_output_path(ensure_absolute=True)
+        history_store.save_generation(out_root, current_user(request), audio_bytes, voice, ext)
+    except Exception as e:
+        logger.warning(f"Could not save generation to history: {e}")
+
+
+@app.get("/api/history", tags=["History"])
+async def history_list_endpoint(request: Request):
+    """The current user's generation history (newest first)."""
+    out_root = get_output_path(ensure_absolute=True)
+    return {"items": history_store.list_for_user(out_root, current_user(request))}
+
+
+@app.get("/api/history/admin", tags=["History"])
+async def history_admin_endpoint(request: Request):
+    """All users' history grouped by user and by voice, with disk usage. Admin only."""
+    if not is_admin_request(request):
+        raise HTTPException(status_code=403, detail="Admin only.")
+    out_root = get_output_path(ensure_absolute=True)
+    return history_store.grouped_for_admin(out_root)
+
+
+@app.get("/history/file", tags=["History"])
+async def history_file_endpoint(request: Request, name: str, user: str = ""):
+    """Stream a history clip. A user can fetch their own; admin can fetch anyone's."""
+    admin = is_admin_request(request)
+    owner = user.strip().lower() if (user and admin) else current_user(request)
+    out_root = get_output_path(ensure_absolute=True)
+    path = history_store.resolve(out_root, owner, name)
+    if path is None:
+        raise HTTPException(status_code=404, detail="History item not found.")
+    return FileResponse(path, media_type="audio/wav", filename=path.name)
+
+
+@app.post("/history/delete", tags=["History"])
+async def history_delete_endpoint(request: Request, name: str = Form(...), user: str = Form("")):
+    """Delete a history item — your own, or anyone's if admin."""
+    admin = is_admin_request(request)
+    owner = user.strip().lower() if (user and admin) else current_user(request)
+    if user and user.strip().lower() != current_user(request) and not admin:
+        raise HTTPException(status_code=403, detail="You can only delete your own history.")
+    out_root = get_output_path(ensure_absolute=True)
+    ok = history_store.delete_item(out_root, owner, name)
+    if not ok:
+        raise HTTPException(status_code=404, detail="History item not found.")
+    return {"message": "Deleted.", "user": owner, "filename": Path(name).name}
+
+
+@app.post("/history/clear", tags=["History"])
+async def history_clear_endpoint(request: Request, scope: str = Form(...), key: str = Form("")):
+    """Clear a history group. scope='user' clears a user's history (own, or any if admin);
+    scope='voice' clears every generation made with a voice (admin only)."""
+    admin = is_admin_request(request)
+    me = current_user(request)
+    out_root = get_output_path(ensure_absolute=True)
+    if scope == "user":
+        target = key.strip().lower() if (key and admin) else me
+        if target != me and not admin:
+            raise HTTPException(status_code=403, detail="Admin only.")
+        removed = history_store.clear_user(out_root, target)
+    elif scope == "voice":
+        if not admin:
+            raise HTTPException(status_code=403, detail="Admin only.")
+        removed = history_store.clear_voice(out_root, key)
+    else:
+        raise HTTPException(status_code=400, detail="scope must be 'user' or 'voice'.")
+    return {"message": f"Cleared {removed} item(s).", "removed": removed}
+
+
 @app.post("/upload_predefined_voice", tags=["File Management"])
 async def upload_predefined_voice_endpoint(files: List[UploadFile] = File(...)):
     """
@@ -1845,6 +1918,12 @@ async def custom_tts_endpoint(
             raise HTTPException(
                 status_code=500, detail=f"Failed to save audio file: {e}"
             )
+
+    # Auto-save the finished generation into the requester's history.
+    voice_label = (
+        request.reference_audio_filename or request.predefined_voice_id or "voice"
+    )
+    _save_to_history(http_request, encoded_audio_bytes, voice_label, output_format_str)
 
     return StreamingResponse(
         io.BytesIO(encoded_audio_bytes), media_type=media_type, headers=headers
