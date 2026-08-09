@@ -129,7 +129,8 @@ def app_env(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "get_predefined_voices_path",
                         lambda ensure_absolute=True: voices, raising=False)
     # Make admin identity testable: admin@x.com is admin, everyone else is a "friend".
-    monkeypatch.setattr(server, "get_admin_emails", lambda: ["admin@x.com"], raising=False)
+    # is_admin_request lives in webhelpers and reads config.get_admin_emails().
+    monkeypatch.setattr(config, "get_admin_emails", lambda: ["admin@x.com"], raising=False)
 
     # Mock the engine consistently (works whether engine is the real module in-container
     # or the sandbox stub): "model loaded" so endpoints reach voice resolution, and a

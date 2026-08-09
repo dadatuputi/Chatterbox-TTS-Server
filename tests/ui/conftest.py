@@ -103,7 +103,9 @@ def live_server(tmp_path_factory):
     server = importlib.import_module("server")
     server.get_reference_audio_path = lambda ensure_absolute=True: ref
     server.get_predefined_voices_path = lambda ensure_absolute=True: voices
-    server.get_admin_emails = lambda: ["admin@x.com"]
+    # is_admin_request (webhelpers) reads config.get_admin_emails(); routes_extra reads
+    # config.get_*_path(). Patch on the config module so both server and routes_extra see it.
+    config.get_admin_emails = lambda: ["admin@x.com"]
     import engine as eng
     eng.MODEL_LOADED = True
     eng.synthesize = lambda *a, **k: (None, 24000)
