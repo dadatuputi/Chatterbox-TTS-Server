@@ -653,6 +653,37 @@
 
                 <div id="audio-player-container" class="mt-8"></div>
 
+                <!-- Generation history (private to each user; admins get a grouped view) -->
+                <div id="history-section" class="mt-10">
+                    <div class="flex-row items-center gap-2 mb-4">
+                        <h2 class="card__title" style="margin:0;">Your generation history</h2>
+                        <button type="button" id="history-refresh" class="btn secondary small">Refresh</button>
+                    </div>
+                    <div class="card">
+                        <div class="card__body">
+                            <p id="history-empty" class="form-hint">No generations yet.</p>
+                            <div id="history-list"></div>
+
+                            <!-- Admin-only: everyone's history, grouped, with disk usage -->
+                            <div id="history-admin" class="admin-only" style="margin-top:1rem;">
+                                <hr style="border:none;border-top:1px solid var(--color-border-subtle,#e2e8f0);margin:1rem 0;">
+                                <p class="voice-add__title">Admin — all users
+                                    (<span id="history-admin-total">0 B</span> total)</p>
+                                <div class="form-grid">
+                                    <div>
+                                        <p class="form-label small">By user</p>
+                                        <div id="history-by-user"></div>
+                                    </div>
+                                    <div>
+                                        <p class="form-label small">By voice</p>
+                                        <div id="history-by-voice"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="mt-10">
                     <h2 class="card__title mb-4">Tips & Tricks</h2>
                     <div class="card">

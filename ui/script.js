@@ -641,6 +641,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             appCapabilities = data.capabilities || {};
             appVoices = data.voices || [];
             applyCapabilities();
+            loadHistory();
             hideChunkWarning = currentUiState.hide_chunk_warning || false;
             hideGenerationWarning = currentUiState.hide_generation_warning || false;
             currentVoiceMode = currentUiState.last_voice_mode || 'predefined';
@@ -1139,6 +1140,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             };
             initializeWaveSurfer(resultDetails.outputUrl, resultDetails);
             showNotification('Audio generated successfully!', 'success');
+            if (jsonData.save_to_history !== false) loadHistory();  // reflect the new item
         } catch (error) {
             console.error('TTS Generation Error:', error);
             showNotification(error.message || 'An unknown error occurred during TTS generation.', 'error');
@@ -1598,6 +1600,85 @@ document.addEventListener('DOMContentLoaded', async function () {
             }
         } catch (e) { /* non-fatal */ }
     }
+
+    // --- Phase 4b: generation history panel ---
+    function fmtBytes(n) {
+        n = n || 0;
+        if (n < 1024) return n + ' B';
+        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+        return (n / 1048576).toFixed(1) + ' MB';
+    }
+
+    async function loadHistory() {
+        const list = document.getElementById('history-list');
+        const empty = document.getElementById('history-empty');
+        if (!list) return;
+        try {
+            const r = await fetch(`${API_BASE_URL}/api/history`);
+            if (!r.ok) return;
+            const items = (await r.json()).items || [];
+            list.innerHTML = '';
+            if (empty) empty.classList.toggle('hidden', items.length > 0);
+            items.forEach(it => {
+                const row = document.createElement('div');
+                row.className = 'history-row';
+                const label = document.createElement('span');
+                label.className = 'history-row__label';
+                label.textContent = `${(it.created || '').replace('T', ' ').replace('Z', '')} — ${it.voice || 'voice'}`;
+                const audio = document.createElement('audio');
+                audio.controls = true; audio.preload = 'none';
+                audio.src = `${API_BASE_URL}/history/file?name=${encodeURIComponent(it.filename)}`;
+                const del = document.createElement('button');
+                del.className = 'btn secondary small'; del.textContent = 'Delete';
+                del.addEventListener('click', async () => {
+                    const fd = new FormData(); fd.append('name', it.filename);
+                    const rr = await fetch(`${API_BASE_URL}/history/delete`, { method: 'POST', body: fd });
+                    if (rr.ok) loadHistory(); else showNotification('Delete failed', 'error');
+                });
+                row.append(label, audio, del);
+                list.appendChild(row);
+            });
+            if (appCapabilities?.is_admin) loadHistoryAdmin();
+        } catch (e) { /* non-fatal */ }
+    }
+
+    function _historyGroupRow(text, onClear) {
+        const row = document.createElement('div'); row.className = 'history-row';
+        const s = document.createElement('span'); s.className = 'history-row__label'; s.textContent = text;
+        const c = document.createElement('button'); c.className = 'btn secondary small'; c.textContent = 'Clear';
+        c.addEventListener('click', onClear);
+        row.append(s, c);
+        return row;
+    }
+
+    async function loadHistoryAdmin() {
+        const total = document.getElementById('history-admin-total');
+        const bu = document.getElementById('history-by-user');
+        const bv = document.getElementById('history-by-voice');
+        if (!bu || !bv) return;
+        try {
+            const r = await fetch(`${API_BASE_URL}/api/history/admin`);
+            if (!r.ok) return;
+            const g = await r.json();
+            if (total) total.textContent = fmtBytes(g.total_size);
+            bu.innerHTML = ''; bv.innerHTML = '';
+            (g.by_user || []).forEach(u => bu.appendChild(_historyGroupRow(
+                `${u.user} — ${u.items.length} (${fmtBytes(u.size)})`,
+                async () => {
+                    const fd = new FormData(); fd.append('scope', 'user'); fd.append('key', u.user);
+                    if ((await fetch(`${API_BASE_URL}/history/clear`, { method: 'POST', body: fd })).ok) loadHistory();
+                })));
+            (g.by_voice || []).forEach(v => bv.appendChild(_historyGroupRow(
+                `${v.voice || '—'} — ${v.count} (${fmtBytes(v.size)})`,
+                async () => {
+                    const fd = new FormData(); fd.append('scope', 'voice'); fd.append('key', v.voice);
+                    if ((await fetch(`${API_BASE_URL}/history/clear`, { method: 'POST', body: fd })).ok) loadHistory();
+                })));
+        } catch (e) { /* non-fatal */ }
+    }
+
+    const historyRefreshBtn = document.getElementById('history-refresh');
+    if (historyRefreshBtn) historyRefreshBtn.addEventListener('click', loadHistory);
 
     function setImportStatus(msg, type = 'info') {
         if (!importStatus) return;
