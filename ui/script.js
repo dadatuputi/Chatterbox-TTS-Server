@@ -641,7 +641,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             appCapabilities = data.capabilities || {};
             appVoices = data.voices || [];
             applyCapabilities();
-            loadHistory();
+            document.dispatchEvent(new CustomEvent('tts:refresh-history'));
             hideChunkWarning = currentUiState.hide_chunk_warning || false;
             hideGenerationWarning = currentUiState.hide_generation_warning || false;
             currentVoiceMode = currentUiState.last_voice_mode || 'predefined';
@@ -1140,7 +1140,8 @@ document.addEventListener('DOMContentLoaded', async function () {
             };
             initializeWaveSurfer(resultDetails.outputUrl, resultDetails);
             showNotification('Audio generated successfully!', 'success');
-            if (jsonData.save_to_history !== false) loadHistory();  // reflect the new item
+            if (jsonData.save_to_history !== false)  // reflect the new item
+                document.dispatchEvent(new CustomEvent('tts:refresh-history'));
         } catch (error) {
             console.error('TTS Generation Error:', error);
             showNotification(error.message || 'An unknown error occurred during TTS generation.', 'error');
@@ -1601,149 +1602,14 @@ document.addEventListener('DOMContentLoaded', async function () {
         } catch (e) { /* non-fatal */ }
     }
 
-    // --- Phase 4b: generation history panel ---
-    function fmtBytes(n) {
-        n = n || 0;
-        if (n < 1024) return n + ' B';
-        if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
-        return (n / 1048576).toFixed(1) + ' MB';
-    }
-
-    async function loadHistory() {
-        const list = document.getElementById('history-list');
-        const empty = document.getElementById('history-empty');
-        if (!list) return;
-        try {
-            const r = await fetch(`${API_BASE_URL}/api/history`);
-            if (!r.ok) return;
-            const items = (await r.json()).items || [];
-            list.innerHTML = '';
-            if (empty) empty.classList.toggle('hidden', items.length > 0);
-            items.forEach(it => {
-                const row = document.createElement('div');
-                row.className = 'history-row';
-                const label = document.createElement('span');
-                label.className = 'history-row__label';
-                label.textContent = `${(it.created || '').replace('T', ' ').replace('Z', '')} — ${it.voice || 'voice'}`;
-                const audio = document.createElement('audio');
-                audio.controls = true; audio.preload = 'none';
-                audio.src = `${API_BASE_URL}/history/file?name=${encodeURIComponent(it.filename)}`;
-                const del = document.createElement('button');
-                del.className = 'btn secondary small'; del.textContent = 'Delete';
-                del.addEventListener('click', async () => {
-                    const fd = new FormData(); fd.append('name', it.filename);
-                    const rr = await fetch(`${API_BASE_URL}/history/delete`, { method: 'POST', body: fd });
-                    if (rr.ok) loadHistory(); else showNotification('Delete failed', 'error');
-                });
-                row.append(label, audio, del);
-                list.appendChild(row);
-            });
-            if (appCapabilities?.is_admin) loadHistoryAdmin();
-        } catch (e) { /* non-fatal */ }
-    }
-
-    function _historyGroupRow(text, onClear) {
-        const row = document.createElement('div'); row.className = 'history-row';
-        const s = document.createElement('span'); s.className = 'history-row__label'; s.textContent = text;
-        const c = document.createElement('button'); c.className = 'btn secondary small'; c.textContent = 'Clear';
-        c.addEventListener('click', onClear);
-        row.append(s, c);
-        return row;
-    }
-
-    async function loadHistoryAdmin() {
-        const total = document.getElementById('history-admin-total');
-        const bu = document.getElementById('history-by-user');
-        const bv = document.getElementById('history-by-voice');
-        if (!bu || !bv) return;
-        try {
-            const r = await fetch(`${API_BASE_URL}/api/history/admin`);
-            if (!r.ok) return;
-            const g = await r.json();
-            if (total) total.textContent = fmtBytes(g.total_size);
-            bu.innerHTML = ''; bv.innerHTML = '';
-            (g.by_user || []).forEach(u => bu.appendChild(_historyGroupRow(
-                `${u.user} — ${u.items.length} (${fmtBytes(u.size)})`,
-                async () => {
-                    const fd = new FormData(); fd.append('scope', 'user'); fd.append('key', u.user);
-                    if ((await fetch(`${API_BASE_URL}/history/clear`, { method: 'POST', body: fd })).ok) loadHistory();
-                })));
-            (g.by_voice || []).forEach(v => bv.appendChild(_historyGroupRow(
-                `${v.voice || '—'} — ${v.count} (${fmtBytes(v.size)})`,
-                async () => {
-                    const fd = new FormData(); fd.append('scope', 'voice'); fd.append('key', v.voice);
-                    if ((await fetch(`${API_BASE_URL}/history/clear`, { method: 'POST', body: fd })).ok) loadHistory();
-                })));
-        } catch (e) { /* non-fatal */ }
-    }
-
-    const historyRefreshBtn = document.getElementById('history-refresh');
-    if (historyRefreshBtn) historyRefreshBtn.addEventListener('click', loadHistory);
-
-    // --- Phase 4c: best-of-N take picker ---
-    async function generateVariations(n) {
-        const container = document.getElementById('best-of-n-results');
-        if (!container) return;
-        const base = getTTSFormData();
-        if (!base || !base.text || !base.text.trim()) {
-            showNotification('Enter text first.', 'warning');
-            return;
-        }
-        container.innerHTML = '<p class="form-hint">Generating variations…</p>';
-        const rows = [];
-        for (let i = 0; i < n; i++) {
-            const seed = 1000 + i;  // distinct non-zero seeds → each take is reproducible
-            const body = { ...base, seed, save_to_history: false, stream: false };
-            try {
-                const resp = await fetch(`${API_BASE_URL}/tts`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(body),
-                });
-                if (!resp.ok) continue;
-                const blob = await resp.blob();
-                rows.push({ seed, url: URL.createObjectURL(blob), i });
-            } catch (e) { /* skip this take */ }
-        }
-        container.innerHTML = '';
-        if (!rows.length) { container.innerHTML = '<p class="form-hint">No variations produced.</p>'; return; }
-        rows.forEach(({ seed, url, i }) => {
-            const row = document.createElement('div'); row.className = 'history-row';
-            const label = document.createElement('span'); label.className = 'history-row__label';
-            label.textContent = `Take ${i + 1} (seed ${seed})`;
-            const audio = document.createElement('audio'); audio.controls = true; audio.src = url;
-            const keep = document.createElement('button'); keep.className = 'btn primary small'; keep.textContent = 'Keep';
-            keep.addEventListener('click', async () => {
-                // Re-generate the chosen seed with history on (deterministic reproduction).
-                const kept = { ...base, seed, save_to_history: true, stream: false };
-                const rr = await fetch(`${API_BASE_URL}/tts`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(kept),
-                });
-                if (rr.ok) {
-                    const kb = await rr.blob();
-                    initializeWaveSurfer(URL.createObjectURL(kb), {
-                        outputUrl: URL.createObjectURL(kb), filename: `take_${i + 1}.wav`,
-                        submittedVoiceMode: base.voice_mode,
-                    });
-                    showNotification(`Kept take ${i + 1}.`, 'success');
-                    container.innerHTML = '';
-                    loadHistory();
-                } else {
-                    showNotification('Could not keep that take.', 'error');
-                }
-            });
-            row.append(label, audio, keep);
-            container.appendChild(row);
-        });
-    }
-
-    const bestOfNBtn = document.getElementById('best-of-n-btn');
-    if (bestOfNBtn) {
-        bestOfNBtn.addEventListener('click', () => {
-            const n = Math.max(2, Math.min(6, parseInt(document.getElementById('best-of-n')?.value, 10) || 3));
-            generateVariations(n);
-        });
-    }
+    // --- fork: bridge so ui/extra.js can drive shared app functions ---
+    window.TTSApp = {
+        apiBase: API_BASE_URL,
+        notify: (msg, type, ms) => showNotification(msg, type, ms),
+        getTTSFormData: () => getTTSFormData(),
+        showResult: (url, details) => initializeWaveSurfer(url, details),
+        isAdmin: () => appCapabilities?.is_admin !== false,
+    };
 
     // --- Phase 4d: accordion — opening one section closes others in its group ---
     document.querySelectorAll('details.js-accordion').forEach(d => {
