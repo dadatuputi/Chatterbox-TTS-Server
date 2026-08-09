@@ -231,6 +231,13 @@
                                 <!-- Add a new custom voice: three distinct methods -->
                                 <div class="voice-add">
                                     <p class="voice-add__title">Add a new custom voice</p>
+                                    <div class="form-group">
+                                        <label for="voice-visibility" class="form-label small">Who can use it</label>
+                                        <select id="voice-visibility" class="form-select small">
+                                            <option value="private" selected>Only me</option>
+                                            <option value="shared">Everyone</option>
+                                        </select>
+                                    </div>
                                     <div class="voice-tabs" role="tablist">
                                         <button type="button" class="voice-tab active" data-voice-tab="upload"
                                             id="voice-tab-upload" role="tab" aria-selected="true">
@@ -524,6 +531,13 @@
                                 </div>
                             </details>
 
+                            <div id="settings-locked-badge" class="friend-only settings-locked">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                                    style="width:1rem;height:1rem;vertical-align:-2px;margin-right:0.35rem;">
+                                    <path fill-rule="evenodd" d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z" clip-rule="evenodd" />
+                                </svg>
+                                Server settings are locked (admin only).
+                            </div>
                             <details class="collapsible admin-only" id="server-config-section" open>
                                 <summary class="collapsible__trigger">
                                     <span>Server Configuration</span>
@@ -535,6 +549,7 @@
                                 </summary>
                                 <div class="collapsible__content">
                                     <div id="server-config-form">
+                                        <p id="settings-unlocked-note" class="settings-unlocked mb-2"></p>
                                         <p class="form-hint mb-4">
                                             These settings are loaded from <code class="code">config.yaml</code> via an
                                             API call.

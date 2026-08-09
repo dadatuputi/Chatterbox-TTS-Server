@@ -111,6 +111,7 @@ document.addEventListener('DOMContentLoaded', async function () {
     let ytCurrentVideoId = null;    // currently embedded video id
     let ytTimePoll = null;          // setInterval handle for the position readout
     let appCapabilities = {};
+    let appVoices = [];
     const presetsContainer = document.getElementById('presets-container');
     const presetsPlaceholder = document.getElementById('presets-placeholder');
     const temperatureSlider = document.getElementById('temperature');
@@ -638,6 +639,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             initialReferenceFiles = data.reference_files || [];
             initialPredefinedVoices = data.predefined_voices || [];
             appCapabilities = data.capabilities || {};
+            appVoices = data.voices || [];
             applyCapabilities();
             hideChunkWarning = currentUiState.hide_chunk_warning || false;
             hideGenerationWarning = currentUiState.hide_generation_warning || false;
@@ -820,10 +822,19 @@ document.addEventListener('DOMContentLoaded', async function () {
         if (!cloneReferenceSelect) return;
         const currentSelectedValue = cloneReferenceSelect.value;
         cloneReferenceSelect.innerHTML = '<option value="none">-- Select Reference File --</option>';
+        const meta = {};
+        (appVoices || []).forEach(v => { meta[v.filename] = v; });
         filesData.forEach(filename => {
             const option = document.createElement('option');
             option.value = filename;
-            option.textContent = filename;
+            const v = meta[filename];
+            if (v) {
+                const who = v.visibility === 'private' ? 'you' : (v.owner === 'shared' || v.owner === 'legacy' ? 'shared' : v.owner);
+                const date = (v.created || '').slice(0, 10);
+                option.textContent = `${filename} — ${who}${date ? ', ' + date : ''}`;
+            } else {
+                option.textContent = filename;
+            }
             cloneReferenceSelect.appendChild(option);
         });
         const lastSelected = currentUiState.last_reference_file;
@@ -1458,6 +1469,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         }, cloneImportButton, {
             cleanup: document.getElementById('clone-upload-cleanup')?.checked ? 'true' : 'false',
             auto_extract: document.getElementById('clone-upload-autoextract')?.checked ? 'true' : 'false',
+            visibility: document.getElementById('voice-visibility')?.value || 'private',
         }));
     }
 
@@ -1479,11 +1491,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             cloneRefreshButton.innerHTML = `<svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>`;
             cloneRefreshButton.disabled = true;
             try {
-                const response = await fetch(`${API_BASE_URL}/get_reference_files`);
-                if (!response.ok) throw new Error('Failed to fetch reference files list');
-                const files = await response.json();
-                initialReferenceFiles = files;
-                populateReferenceFiles();
+                await refreshVoiceMeta();  // also refreshes owner/visibility/created annotations
                 showNotification("Reference file list refreshed.", 'info', 2000);
                 debouncedSaveState();
             } catch (error) {
@@ -1561,6 +1569,12 @@ document.addEventListener('DOMContentLoaded', async function () {
         // Enforcement is server-side; this just declutters their view.
         const isAdmin = appCapabilities?.is_admin !== false; // default admin if unknown
         document.body.classList.toggle('non-admin', !isAdmin);
+        const unlockedNote = document.getElementById('settings-unlocked-note');
+        if (unlockedNote && isAdmin) {
+            const who = appCapabilities?.user_email && appCapabilities.user_email !== 'local'
+                ? ` (${appCapabilities.user_email})` : '';
+            unlockedNote.textContent = `Unlocked — admin${who}`;
+        }
 
         const importAvailable = appCapabilities?.import?.available;
         const urlTab = document.getElementById('voice-tab-url');
@@ -1571,6 +1585,18 @@ document.addEventListener('DOMContentLoaded', async function () {
                 activateVoiceTab('upload');
             }
         }
+    }
+
+    async function refreshVoiceMeta() {
+        // Refresh the rich voice metadata (owner/visibility/created) then repopulate.
+        try {
+            const resp = await fetch(`${API_BASE_URL}/api/voices`);
+            if (resp.ok) {
+                appVoices = await resp.json();
+                initialReferenceFiles = appVoices.map(v => v.filename);
+                populateReferenceFiles();
+            }
+        } catch (e) { /* non-fatal */ }
     }
 
     function setImportStatus(msg, type = 'info') {
@@ -1606,6 +1632,7 @@ document.addEventListener('DOMContentLoaded', async function () {
         fd.append('preview', preview ? 'true' : 'false');
         fd.append('cleanup', document.getElementById('import-cleanup')?.checked ? 'true' : 'false');
         fd.append('auto_extract', document.getElementById('import-autoextract')?.checked ? 'true' : 'false');
+        fd.append('visibility', document.getElementById('voice-visibility')?.value || 'private');
         return fd;
     }
 
@@ -1899,6 +1926,7 @@ document.addEventListener('DOMContentLoaded', async function () {
             fd.append('audio', micBlob, `recording.${ext}`);
             fd.append('name', name);
             fd.append('cleanup', document.getElementById('mic-cleanup')?.checked ? 'true' : 'false');
+            fd.append('visibility', document.getElementById('voice-visibility')?.value || 'private');
             micSaveButton.disabled = true;
             setMicStatus('Saving…', 'info');
             try {

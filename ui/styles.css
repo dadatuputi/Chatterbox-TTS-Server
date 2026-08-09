@@ -1881,3 +1881,19 @@ a.btn.disabled {
 
 /* Admin-only UI: hidden for non-admin (friend) sessions. Enforcement is server-side. */
 body.non-admin .admin-only { display: none !important; }
+
+/* Settings lock indicator */
+.friend-only { display: none; }
+body.non-admin .friend-only { display: block; }
+.settings-locked {
+    color: var(--color-text-muted, #64748b);
+    font-size: 0.85rem;
+    padding: var(--space-3, 0.75rem);
+    border: 1px dashed var(--color-border-default, #cbd5e1);
+    border-radius: 6px;
+}
+.settings-unlocked {
+    color: var(--color-success-text, #166534);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
